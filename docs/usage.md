@@ -1,0 +1,249 @@
+# KuickShare user guide
+
+KuickShare sends and receives files, text and links with Android phones through Google's Quick Share, from a KDE Plasma 6 desktop. This guide covers installation, daily use, every preference and troubleshooting. For how it works inside, see [architecture.md](architecture.md); for the D-Bus interface of the background service, see [dbus-api.md](dbus-api.md).
+
+KuickShare has two programs. `kuickshare` is the window, tray icon and notifications. `kuickshared` is the background service that speaks the Quick Share protocol; the window starts it and stops it.
+
+## Requirements
+
+- Fedora 44 with KDE Plasma 6. Nothing else has been tried.
+- Packages: `kf6-kirigami`, `kf6-kirigami-addons`, `qt6-qtdeclarative`. The installer checks for them and prints the `dnf install` line if one is missing.
+- The computer and the phone on the same Wi-Fi network. Bluetooth is used to find devices, never to move data. Wi-Fi Direct is not supported.
+- A Google account is not needed and cannot be used.
+
+## Installing, updating and uninstalling
+
+The AppImage is an installer, not the program itself. Running it copies KuickShare into `~/.local` and starts it. Afterwards the AppImage can be deleted.
+
+```sh
+chmod +x KuickShare-<version>-x86_64.AppImage
+./KuickShare-<version>-x86_64.AppImage
+```
+
+Running a newer AppImage updates the installation. A running instance is stopped and started again. Your settings, history and paired devices are not touched. If you turned off the Dolphin menu entry, an update does not bring it back.
+
+| Command | Effect |
+|---|---|
+| `KuickShare.AppImage` | Install or update, then start the app |
+| `KuickShare.AppImage file...` | Same, and queue the files on the Send page |
+| `KuickShare.AppImage --no-launch` | Install or update without starting the app (a running instance is still restarted) |
+| `KuickShare.AppImage --uninstall` | Remove the program; settings, history and paired devices stay |
+| `KuickShare.AppImage --uninstall --purge` | Also delete settings, history, paired devices and the identity key |
+| `~/.local/share/kuickshare/uninstall.sh` | Same as `--uninstall`, without the AppImage |
+| `~/.local/share/kuickshare/uninstall.sh --purge` | Same as `--uninstall --purge` |
+
+Paths follow `XDG_DATA_HOME` and `XDG_CONFIG_HOME` when set; the table shows the defaults.
+
+| What | Where |
+|---|---|
+| Programs `kuickshare`, `kuickshared` | `~/.local/share/kuickshare/bin/` |
+| Command in the shell path | `~/.local/bin/kuickshare` (a link; an existing file or link of yours is left alone) |
+| Installer, uninstaller, version | `~/.local/share/kuickshare/` |
+| Menu entry, app metadata | `~/.local/share/applications/`, `~/.local/share/metainfo/` |
+| Dolphin "Send with KuickShare" | `~/.local/share/kio/servicemenus/kuickshare-send.desktop` |
+| Notification definitions | `~/.local/share/knotifications6/kuickshare.notifyrc` |
+| Icons | `~/.local/share/icons/hicolor/` |
+| Translations | `~/.local/share/locale/` |
+| Autostart entry (only if "Start at login" is on) | `~/.config/autostart/io.github.the_beper.KuickShare.desktop` |
+
+Uninstalling removes all of these except the data listed under [Where things are stored](#where-things-are-stored), which `--purge` removes as well.
+
+## First run
+
+The window opens on the Send page and a tray icon appears. The computer is visible to nearby devices under the hostname, until you change the name in Preferences.
+
+The window has a fixed size. Closing it hides it in the tray and the service keeps running, so the computer can still receive. The tray icon opens the window on a left click. Its menu has these entries:
+
+| Entry | Effect |
+|---|---|
+| Open KuickShare | Show the window |
+| Send files... | Open the file chooser on the Send page |
+| Send clipboard | Add the clipboard to the Send page |
+| Visible to nearby devices | Same switch as in Preferences |
+| Preferences | Open Preferences |
+| Quit | Quit; asks first if a transfer is running |
+
+Without the tray icon (a preference), closing the window quits the app. See [Preferences](#preferences).
+
+The tabs are Send and Transfers. The icon at their right opens a menu with Preferences, Shortcuts, Help, About and Quit.
+
+## Sending
+
+![The Send page with a device list](screenshots/send.png)
+
+The Send page takes files, or text, or a link. Choose what to send, then click a device in the "Send to" list. The status line at the top says whether this computer is ready, hidden or hidden by Do Not Disturb.
+
+On the phone, open Quick Share and set it to receive from **Everyone** first. See [Troubleshooting](#troubleshooting).
+
+### Files
+
+![The Send page with files queued](screenshots/send-files.png)
+
+There are five ways to add files, and they combine:
+
+- Click the drop area, or press `Ctrl+O`, or use **Send files...** in the tray menu.
+- Drop files on the drop area, or anywhere on the window. The window accepts a drop on any page and switches to Send.
+- Press `Ctrl+V` on the Send page. File paths copied in Dolphin are added as files. An image on the clipboard without text, such as a screenshot, is saved as a PNG in `~/.cache/kuickshare/clipboard/` (unverified: the exact directory, it is the application cache directory of the app) and added.
+- Use **Paste from clipboard** in the drop area, or **Send clipboard** in the tray menu.
+- Pass them on the command line, or use the Dolphin entry below.
+
+Only regular files are queued; folders given on the command line are ignored (unverified for folders dropped on the window). The list shows the first five files and a "Show all" link for the rest. **Clear** empties the list, **Add** adds more.
+
+### Text and links
+
+The "Text or link" box takes up to 100000 characters. A counter appears when the text is within 10% of the limit; pasting and typing stop at the limit and longer text is cut. Spaces and blank lines around the text, and trailing spaces on each line, are removed before sending.
+
+If the whole text is one link of the form `scheme://host.tld...`, it is sent as a link by default. The receiving phone then offers to open it. Tick **Send as text** to send it as plain text instead. A link with any other text around it can only be sent as text, so the box is ticked and locked. Files and text are exclusive: if files are queued, they are sent and the text is not.
+
+`Ctrl+V` outside the text box pastes into the page as described above; inside the text box it pastes text only.
+
+### From Dolphin and the command line
+
+Right-click files in Dolphin and choose **Send with KuickShare**. It is a top-level entry and opens the Send page with the files queued. It can be turned off in Preferences.
+
+```sh
+kuickshare [--background] [--page send|transfers|settings|help] [files...]
+```
+
+`kuickshare --help` lists the options. If KuickShare is already running, a second launch hands its files to the running window and shows it. `--page` accepts `send`, `transfers`, `settings` or `help`; the window on the Send page is the default. `--background` starts hidden in the tray, which is what the login entry uses.
+
+## Receiving
+
+When a nearby device wants to send, a persistent notification titled "Incoming transfer" names the sender, shows a PIN if the protocol supplied one, and offers these actions:
+
+| Action | Effect |
+|---|---|
+| Accept | Receive the transfer |
+| Accept and trust | Accept, and add the sender to the trusted devices (only if trusted devices are on; see [below](#trusted-devices)) |
+| Decline | Refuse the transfer |
+
+The same request is also listed on the Transfers page with Accept and Decline buttons. Compare the PIN with the one on the phone before accepting.
+
+A request nobody answers is declined after 5 minutes.
+
+Files go to the download folder, `~/Downloads` unless you chose another one in Preferences. Progress and a cancel button appear in Plasma's job tracker. When it finishes you get a "Files received" notification with **Open folder**. Text arrives as a "Text received" notification with **Copy**, and **Open link** when the text is a single `http://` or `https://` address.
+
+A sender can propose file names that would write outside the download folder. KuickShare declines such a transfer before asking you. A name is refused if it is empty, is `.` or `..`, is longer than 255 bytes, or contains a `/`, a `\`, a control character, or an invisible character such as a zero-width space or a right-to-left override. The decision is logged; no notification is shown (unverified: the shell may still show the transfer as declined or interrupted).
+
+Sending to the phone produces the same notifications in the other direction. If the phone declines before any data moved, you see "Transfer not accepted"; a lost connection gives "Transfer interrupted".
+
+## Transfers page and history
+
+![The Transfers page](screenshots/transfers.png)
+
+The Transfers page lists transfers newest first, running ones included. A card shows the device, the state, the size and the date. Buttons depend on the state:
+
+| Button | When |
+|---|---|
+| Accept, Decline | A request is waiting |
+| Cancel | A transfer is running |
+| Open folder | A received file transfer finished |
+| Copy | A text or link was received or sent |
+| More details | Always on finished entries: result, size, file names or text |
+| Remove from list | Finished entries |
+
+Entries keep at most 200 file names and 10000 characters of text. Wi-Fi credentials received from a phone are stored without the password. **Clear history** deletes the list and does not touch received files. A banner suggests clearing when the history file gets large.
+
+The history is saved in a file on disk, 500 entries at most (the oldest go first). It is controlled in Preferences: it can be turned off, and entries can expire after 1, 7, 30 or 90 days. With the history off, the page only lists transfers made while the app is open.
+
+## Paired devices
+
+Pairing lets two computers running KuickShare send to each other without asking. Phones cannot take part, because the pairing uses a channel of its own on top of Quick Share (see [architecture.md](architecture.md) for the protocol and its limits).
+
+![The pairing dialog showing an 8-digit code](screenshots/pair.png)
+
+1. On both computers open Preferences and choose **Pair a device...**.
+2. On one of them, click the other computer in the list. Computers already paired are listed as "Already paired" and cannot be chosen.
+3. Both screens show the same 8-digit code. Check that it is identical, then click **The codes match** on both. If it differs, click **They differ**.
+4. Each computer shows "Paired with ..." when the other side confirmed too.
+
+Closing the dialog before confirming cancels the pairing.
+
+The computers must reach each other on TCP port **47891**; open it in the firewall if one is active. Paired computers are listed in Preferences with a short fingerprint and a **Remove** button. Removing one only forgets it on this computer; remove it on the other computer too.
+
+Once paired, a transfer from the other computer is accepted without a notification when it arrives from the same IP address within 60 seconds of the sender's announcement. The match is by address, so pair only computers you own.
+
+## Trusted devices
+
+Phones cannot pair, so KuickShare can remember them instead. Tap **Accept and trust** on the notification of an incoming transfer, and that device is accepted without asking from then on.
+
+A device is recognised by its advertised name **and** its MAC address together. The MAC is read from the kernel's ARP table for the sender's IP address, so this works on the local network only. If the MAC cannot be read, you are asked as usual. Android uses a different MAC for each Wi-Fi network, so the same phone on another network is asked about again.
+
+> [!WARNING]
+> Someone on your network who copies both the name and the MAC is accepted too. Use trusted devices only on networks where you trust every device.
+
+Preferences has a **Trusted devices** section with the list (name and MAC address, each with **Remove**) and a **Trust devices** switch. Switched off, listed devices are asked about again and the notification has no **Accept and trust** action. The list is kept for when the switch is turned on again.
+
+## Preferences
+
+![The Preferences page](screenshots/preferences.png)
+
+Open it with `Ctrl+,`, from the menu, or from the tray. Changes apply at once and are saved in `settings.json`.
+
+| Section | Preference | Default | Effect |
+|---|---|---|---|
+| Visibility | Device name | Hostname | Name shown to other devices. Changing it restarts sharing; it fails while a transfer runs |
+| Visibility | Visible to nearby devices | On | Others can find this computer and send to it. Off means nothing can be received |
+| Visibility | Hide during Do Not Disturb | On | Hidden while Plasma's Do Not Disturb is on. See [Do Not Disturb](#do-not-disturb) |
+| Receiving | Download folder | `~/Downloads` | Where received files are saved. "Use the default folder" resets it |
+| Receiving | Random port / Fixed port | Random | The port for transfers. Random picks a new one at every start; a fixed one (1024 to 65535) can be opened in the firewall. Changing it restarts sharing and fails while a transfer runs |
+| Paired devices | Pair a device... | none paired | Opens the [pairing dialog](#paired-devices); lists paired computers |
+| Trusted devices | Trust devices | On | Accept [trusted devices](#trusted-devices) without asking; lists them |
+| History | Save transfer history | On | Record finished transfers |
+| History | Delete entries after | Never | Never, 1, 7, 30 or 90 days. Applied at startup, when the history is read and when a transfer is added |
+| Startup | Start at login | Off | Writes the autostart entry; the app starts hidden. The entry points at the running binary, so switch it off and on again after moving the installation |
+| Integration | Show tray icon | On | Without it, closing the window quits the app and nothing can be received until you open it again. At login it still starts hidden, so start KuickShare again to see the window |
+| Integration | Dolphin context menu | On | Adds or removes **Send with KuickShare** |
+| Reset | Reset preferences... | | Restores every setting to its default, including autostart off and the Dolphin entry on. History, paired and trusted devices are kept |
+
+## Do Not Disturb
+
+When "Hide during Do Not Disturb" is on and Plasma's Do Not Disturb is active, KuickShare hides this computer from nearby devices. The Send page shows "Do Not Disturb" and "Hidden until Do Not Disturb ends". The visibility preference itself is not changed, so the computer reappears when Do Not Disturb ends. The state is read from the notification service and re-read if the Plasma shell restarts.
+
+Whether a transfer already running is affected when Do Not Disturb starts was not checked (unverified).
+
+## Keyboard shortcuts
+
+Also listed in the app under More, Shortcuts.
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+1` | Send page |
+| `Ctrl+2` | Transfers page |
+| `Ctrl+,` | Preferences |
+| `Ctrl+H`, `F1` | Help |
+| `Ctrl+?` | Show the shortcuts |
+| `Ctrl+O` | Choose files to send |
+| `Ctrl+V` | On the Send page: paste files, an image or text from the clipboard |
+| `Ctrl+L` | Clear files and text |
+| `Ctrl+W` | Close the window (hides it, or quits without the tray icon) |
+| `Ctrl+Q` | Quit KuickShare |
+
+## Troubleshooting
+
+**The phone does not see this computer.** Check, in this order:
+
+1. "Visible to nearby devices" is on in Preferences and the Send page says "Ready".
+2. Do Not Disturb is off, or "Hide during Do Not Disturb" is off.
+3. Both devices are on the same network, and the network allows devices to talk to each other. Guest and some mesh networks do not.
+4. The firewall lets mDNS through (UDP 5353). If you fixed a transfer port in Preferences, open that TCP port too. With a random port the firewall has to allow incoming connections from the local network. On Fedora, `firewalld` is the usual cause.
+
+**This computer does not see the phone.** The phone must be set to **Everyone** and its Quick Share screen should stay open. A phone that is hidden or set to contacts announces no name and is not listed. Android sets the visibility back after 10 minutes, so set it again when the list goes empty.
+
+**The red banner "The sharing service is not running".** The window could not reach `kuickshared`. Click **Start service** in the banner. If it does not come back, start `kuickshare` from a terminal to see the service's output.
+
+**A trusted phone is asked about again.** It joined another network and has a new MAC, or its name changed. Accept and trust it again.
+
+**Transfer not accepted.** The phone declined, timed out, or could not receive (for instance, a full disk).
+
+### Where things are stored
+
+| What | Location |
+|---|---|
+| Settings and trusted devices | `~/.config/kuickshare/settings.json` |
+| History | `~/.local/share/kuickshare/history.json` |
+| Identity key (mode 600) | `~/.local/share/kuickshare/identity.json` |
+| Paired computers | `~/.local/share/kuickshare/peers.json` |
+| Logs | No log file. The service writes to the standard error of the window process, so they show in a terminal when you run `kuickshare` there. Where the desktop session keeps them otherwise is unverified |
+
+A settings file or an identity or peers file that cannot be parsed is moved to a `.bak` copy next to it (unverified for the last two: only the call site was seen) and defaults are used. An unreadable history file is ignored and logged. The log level can be raised for one run: `RUST_LOG=debug kuickshare`, since the service inherits the environment (unverified).

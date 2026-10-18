@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/allfiles;
+Actions=sendWithKuickShare
+X-KDE-Priority=TopLevel
+
+[Desktop Action sendWithKuickShare]
+Name=Send with KuickShare
+Name[it]=Invia con KuickShare
+Icon=io.github.the_beper.KuickShare
+Exec=kuickshare %F

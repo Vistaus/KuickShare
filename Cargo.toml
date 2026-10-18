@@ -1,0 +1,40 @@
+[package]
+name = "kuickshare-core"
+version = "1.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "Quick Share client for KDE Plasma: the background service"
+repository = "https://github.com/the-beper/KuickShare"
+homepage = "https://github.com/the-beper/KuickShare"
+readme = "README.md"
+publish = false
+
+[[bin]]
+name = "kuickshared"
+path = "src/core/main.rs"
+
+[[test]]
+name = "dbus_api"
+path = "tests/core/dbus_api.rs"
+
+[dependencies]
+anyhow = "1"
+dirs = "7"
+hex = "0.4"
+rqs_lib = { git = "https://github.com/nozwock/rquickshare.git", rev = "c9ac93f5584a4265e8da679ad689df5be1e80c6b", default-features = false, features = [
+    "experimental",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+snow = "0.10"
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "signal", "sync", "time", "net", "io-util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zbus = { version = "6.0", default-features = false, features = ["tokio", "service"] }
+
+[profile.release]
+lto = true
+
+[profile.dev.package."*"]
+opt-level = 3

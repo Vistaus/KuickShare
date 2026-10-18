@@ -1,0 +1,940 @@
+# English translation of kuickshare.
+# This file is distributed under the same license as the kuickshare package.
+# the-beper <193650145+the-beper@users.noreply.github.com>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: kuickshare 1.0.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-18 19:52+0000\n"
+"PO-Revision-Date: 2026-10-18 00:00+0000\n"
+"Last-Translator: the-beper <193650145+the-beper@users.noreply.github.com>\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/shell/corebridge.cpp:473
+msgid "Could not update Dolphin's context menu"
+msgstr "Could not update Dolphin's context menu"
+
+#: src/shell/corebridge.cpp:602
+msgid "Could not update the autostart entry"
+msgstr "Could not update the autostart entry"
+
+#: src/shell/corebridge.cpp:687
+msgid "Only files can be shared, folders are not supported"
+msgstr "Only files can be shared, folders are not supported"
+
+#: src/shell/main.cpp:37 src/shell/qml/AboutDialog.qml:136
+msgid "Quick Share client for KDE"
+msgstr "Quick Share client for KDE"
+
+#: src/shell/main.cpp:46
+msgid "Start hidden in the system tray"
+msgstr "Start hidden in the system tray"
+
+#: src/shell/main.cpp:47
+msgid "Open the given page: send, transfers, settings or help"
+msgstr "Open the given page: send, transfers, settings or help"
+
+#: src/shell/main.cpp:53 src/shell/qml/SendPage.qml:149
+msgid "Files to send"
+msgstr "Files to send"
+
+#: src/shell/main.cpp:147
+msgid "Open KuickShare"
+msgstr "Open KuickShare"
+
+#: src/shell/main.cpp:149
+msgid "Send files…"
+msgstr "Send files…"
+
+#: src/shell/main.cpp:150
+msgid "Send clipboard"
+msgstr "Send clipboard"
+
+#: src/shell/main.cpp:151 src/shell/qml/SettingsPage.qml:63
+msgid "Visible to nearby devices"
+msgstr "Visible to nearby devices"
+
+#: src/shell/main.cpp:158 src/shell/qml/Main.qml:228
+#: src/shell/qml/SettingsPage.qml:13 src/shell/qml/ShortcutsDialog.qml:14
+msgid "Preferences"
+msgstr "Preferences"
+
+#: src/shell/main.cpp:159 src/shell/qml/Main.qml:242
+msgid "Quit"
+msgstr "Quit"
+
+#: src/shell/qml/AboutDialog.qml:69 src/shell/qml/Main.qml:256
+msgid "About"
+msgstr "About"
+
+#: src/shell/qml/AboutDialog.qml:92 src/shell/qml/PairDialog.qml:69
+#: src/shell/qml/ShortcutsDialog.qml:61
+msgid "Close"
+msgstr "Close"
+
+#: src/shell/qml/AboutDialog.qml:133
+msgid "KuickShare %1"
+msgstr "KuickShare %1"
+
+#: src/shell/qml/AboutDialog.qml:151
+msgid "Copyright"
+msgstr "Copyright"
+
+#: src/shell/qml/AboutDialog.qml:160
+msgid "Homepage"
+msgstr "Homepage"
+
+#: src/shell/qml/AboutDialog.qml:164
+msgid "Report a Bug"
+msgstr "Report a Bug"
+
+#: src/shell/qml/AboutDialog.qml:169
+msgid "License"
+msgstr "License"
+
+#: src/shell/qml/AboutDialog.qml:173
+msgid "GPL-3.0-or-later"
+msgstr "GPL-3.0-or-later"
+
+#: src/shell/qml/AboutDialog.qml:178
+msgid "Built on"
+msgstr "Built on"
+
+#: src/shell/qml/AboutDialog.qml:182
+msgid "Packet"
+msgstr "Packet"
+
+#: src/shell/qml/AboutDialog.qml:183
+msgid "The Quick Share client this started from, by nozwock"
+msgstr "The Quick Share client this started from, by nozwock"
+
+#: src/shell/qml/AboutDialog.qml:187
+msgid "rquickshare"
+msgstr "rquickshare"
+
+#: src/shell/qml/AboutDialog.qml:188
+msgid "The Quick Share protocol library (rqs_lib), by nozwock and Martichou"
+msgstr "The Quick Share protocol library (rqs_lib), by nozwock and Martichou"
+
+#: src/shell/qml/AboutDialog.qml:193
+msgid "Libraries in use"
+msgstr "Libraries in use"
+
+#: src/shell/qml/AboutDialog.qml:197
+msgid "Qt %1"
+msgstr "Qt %1"
+
+#: src/shell/qml/AboutDialog.qml:198
+msgid "Cross-platform application framework"
+msgstr "Cross-platform application framework"
+
+#: src/shell/qml/AboutDialog.qml:201
+msgid "KDE Frameworks %1"
+msgstr "KDE Frameworks %1"
+
+#: src/shell/qml/AboutDialog.qml:202
+msgid "Kirigami, notifications, jobs and the other KDE libraries"
+msgstr "Kirigami, notifications, jobs and the other KDE libraries"
+
+#: src/shell/qml/HelpPage.qml:12 src/shell/qml/Main.qml:249
+#: src/shell/qml/ShortcutsDialog.qml:15 src/shell/qml/ShortcutsDialog.qml:16
+msgid "Help"
+msgstr "Help"
+
+#: src/shell/qml/HelpPage.qml:26
+msgid "Getting started"
+msgstr "Getting started"
+
+#: src/shell/qml/HelpPage.qml:32 src/shell/qml/Main.qml:184
+#: src/shell/qml/SendPage.qml:39 src/shell/qml/ShortcutsDialog.qml:12
+msgid "Send"
+msgstr "Send"
+
+#: src/shell/qml/HelpPage.qml:33
+msgid ""
+"Choose or drop files, or type some text, on the Send page, then pick a "
+"device. On the phone, open Quick Share."
+msgstr ""
+"Choose or drop files, or type some text, on the Send page, then pick a "
+"device. On the phone, open Quick Share."
+
+#: src/shell/qml/HelpPage.qml:37
+msgid "Be found"
+msgstr "Be found"
+
+#: src/shell/qml/HelpPage.qml:38
+msgid ""
+"Keep “Visible to nearby devices” on in Preferences. The phone must be set to "
+"Everyone to be found, and Android sets it back after 10 minutes."
+msgstr ""
+"Keep “Visible to nearby devices” on in Preferences. The phone must be set to "
+"Everyone to be found, and Android sets it back after 10 minutes."
+
+#: src/shell/qml/HelpPage.qml:42
+msgid "Receive"
+msgstr "Receive"
+
+#: src/shell/qml/HelpPage.qml:43
+msgid ""
+"An incoming transfer asks for your approval in a notification. Received "
+"files go to the download folder chosen in Preferences."
+msgstr ""
+"An incoming transfer asks for your approval in a notification. Received "
+"files go to the download folder chosen in Preferences."
+
+#: src/shell/qml/HelpPage.qml:48
+msgid "Paired and trusted devices"
+msgstr "Paired and trusted devices"
+
+#: src/shell/qml/HelpPage.qml:54
+msgid "Paired computers"
+msgstr "Paired computers"
+
+#: src/shell/qml/HelpPage.qml:55
+msgid ""
+"Two computers running KuickShare can pair with an 8-digit code, then send to "
+"each other without asking. The port 47891 must be reachable."
+msgstr "Two computers running KuickShare can pair with an 8-digit code, then send to each other without asking. The port 47891 must be reachable."
+
+#: src/shell/qml/HelpPage.qml:59 src/shell/qml/SettingsPage.qml:176
+msgid "Trusted devices"
+msgstr "Trusted devices"
+
+#: src/shell/qml/HelpPage.qml:60
+msgid ""
+"“Accept and trust” on a notification accepts a phone without asking from "
+"then on. It is recognised by name and MAC address, so only on the same "
+"network."
+msgstr ""
+"“Accept and trust” on a notification accepts a phone without asking from "
+"then on. It is recognised by name and MAC address, so only on the same "
+"network."
+
+#: src/shell/qml/HelpPage.qml:65
+msgid "Troubleshooting"
+msgstr "Troubleshooting"
+
+#: src/shell/qml/HelpPage.qml:71
+msgid "The phone does not see this computer"
+msgstr "The phone does not see this computer"
+
+#: src/shell/qml/HelpPage.qml:72
+msgid ""
+"Check that “Visible to nearby devices” is on, that Do Not Disturb is off (it "
+"hides this computer) and that both are on the same network."
+msgstr ""
+"Check that “Visible to nearby devices” is on, that Do Not Disturb is off (it "
+"hides this computer) and that both are on the same network."
+
+#: src/shell/qml/HelpPage.qml:76
+msgid "This computer does not see the phone"
+msgstr "This computer does not see the phone"
+
+#: src/shell/qml/HelpPage.qml:77
+msgid "Set the phone to Everyone and keep its Quick Share screen open."
+msgstr "Set the phone to Everyone and keep its Quick Share screen open."
+
+#: src/shell/qml/HelpPage.qml:81
+msgid "Firewall"
+msgstr "Firewall"
+
+#: src/shell/qml/HelpPage.qml:82
+msgid ""
+"Discovery uses mDNS. The transfer port is random unless you fix one in "
+"Preferences: open that port in the firewall."
+msgstr ""
+"Discovery uses mDNS. The transfer port is random unless you fix one in "
+"Preferences: open that port in the firewall."
+
+#: src/shell/qml/Main.qml:20
+msgid "KuickShare"
+msgstr "KuickShare"
+
+#: src/shell/qml/Main.qml:80
+msgid "Quit KuickShare?"
+msgstr "Quit KuickShare?"
+
+#: src/shell/qml/Main.qml:81
+msgid "A transfer is in progress. Quitting stops it."
+msgstr "A transfer is in progress. Quitting stops it."
+
+#: src/shell/qml/Main.qml:191 src/shell/qml/ShortcutsDialog.qml:13
+#: src/shell/qml/TransfersPage.qml:11
+msgid "Transfers"
+msgstr "Transfers"
+
+#: src/shell/qml/Main.qml:209
+msgid "More"
+msgstr "More"
+
+#: src/shell/qml/Main.qml:235 src/shell/qml/ShortcutsDialog.qml:37
+msgid "Shortcuts"
+msgstr "Shortcuts"
+
+#: src/shell/qml/Main.qml:374
+msgid ""
+"The sharing service is not running. Nothing can be sent or received until it "
+"is started."
+msgstr ""
+"The sharing service is not running. Nothing can be sent or received until it "
+"is started."
+
+#: src/shell/qml/Main.qml:377
+msgid "Start service"
+msgstr "Start service"
+
+#: src/shell/qml/PairDialog.qml:19
+msgid "Pair a device"
+msgstr "Pair a device"
+
+#: src/shell/qml/PairDialog.qml:54
+msgid "The codes match"
+msgstr "The codes match"
+
+#: src/shell/qml/PairDialog.qml:63
+msgid "They differ"
+msgstr "They differ"
+
+#: src/shell/qml/PairDialog.qml:82
+msgid ""
+"Open Preferences → Pair a device on the other computer as well, then choose "
+"it here."
+msgstr ""
+"Open Preferences → Pair a device on the other computer as well, then choose "
+"it here."
+
+#: src/shell/qml/PairDialog.qml:109
+msgid "Already paired"
+msgstr "Already paired"
+
+#: src/shell/qml/PairDialog.qml:131
+msgid "Looking for computers running KuickShare…"
+msgstr "Looking for computers running KuickShare…"
+
+#: src/shell/qml/PairDialog.qml:146
+msgid "Waiting for %1…"
+msgstr "Waiting for %1…"
+
+#: src/shell/qml/PairDialog.qml:146
+msgid "Waiting…"
+msgstr "Waiting…"
+
+#: src/shell/qml/PairDialog.qml:161
+msgid "Check that %1 shows exactly this code:"
+msgstr "Check that %1 shows exactly this code:"
+
+#: src/shell/qml/PairDialog.qml:180
+msgid "Paired with %1"
+msgstr "Paired with %1"
+
+#: src/shell/qml/PairDialog.qml:181
+msgid "Transfers between these computers are accepted without asking."
+msgstr "Transfers between these computers are accepted without asking."
+
+#: src/shell/qml/PairDialog.qml:187
+msgid "Pairing did not complete"
+msgstr "Pairing did not complete"
+
+#: src/shell/qml/SendPage.qml:141 src/shell/qml/SettingsPage.qml:153
+#: src/shell/qml/SettingsPage.qml:201
+msgid "Remove"
+msgstr "Remove"
+
+#: src/shell/qml/SendPage.qml:190 src/shell/qml/ShortcutsDialog.qml:18
+msgid "Choose files to send"
+msgstr "Choose files to send"
+
+#: src/shell/qml/SendPage.qml:225
+msgid "Starting…"
+msgstr "Starting…"
+
+#: src/shell/qml/SendPage.qml:225
+msgid "Hidden"
+msgstr "Hidden"
+
+#: src/shell/qml/SendPage.qml:225
+msgid "Do Not Disturb"
+msgstr "Do Not Disturb"
+
+#: src/shell/qml/SendPage.qml:225
+msgid "Ready"
+msgstr "Ready"
+
+#: src/shell/qml/SendPage.qml:230
+msgid "Turn on visibility in Preferences to receive files"
+msgstr "Turn on visibility in Preferences to receive files"
+
+#: src/shell/qml/SendPage.qml:230
+msgid "Hidden until Do Not Disturb ends"
+msgstr "Hidden until Do Not Disturb ends"
+
+#: src/shell/qml/SendPage.qml:230
+msgid "Visible as \"%1\""
+msgstr "Visible as \"%1\""
+
+#: src/shell/qml/SendPage.qml:266
+msgid "Drop to share"
+msgstr "Drop to share"
+
+#: src/shell/qml/SendPage.qml:266
+msgid "Drop files here"
+msgstr "Drop files here"
+
+#: src/shell/qml/SendPage.qml:271
+msgid "or click to choose them"
+msgstr "or click to choose them"
+
+#: src/shell/qml/SendPage.qml:279
+msgid "Paste from clipboard"
+msgstr "Paste from clipboard"
+
+#: src/shell/qml/SendPage.qml:295 src/shell/qml/TransfersPage.qml:284
+#: src/shell/transferwatcher.cpp:83
+msgid "%1 file"
+msgid_plural "%1 files"
+msgstr[0] "%1 file"
+msgstr[1] "%1 files"
+
+#: src/shell/qml/SendPage.qml:304
+msgid "Add"
+msgstr "Add"
+
+#: src/shell/qml/SendPage.qml:309 src/shell/qml/SendPage.qml:366
+msgid "Clear"
+msgstr "Clear"
+
+#: src/shell/qml/SendPage.qml:328
+msgid "Show all %1 files"
+msgstr "Show all %1 files"
+
+#: src/shell/qml/SendPage.qml:353
+msgid "Text or link"
+msgstr "Text or link"
+
+#: src/shell/qml/SendPage.qml:372
+msgid "Paste"
+msgstr "Paste"
+
+#: src/shell/qml/SendPage.qml:400
+msgid "Type or paste something to send…"
+msgstr "Type or paste something to send…"
+
+#: src/shell/qml/SendPage.qml:435
+msgid "A string can only be sent as a link when it is the only content"
+msgstr "A string can only be sent as a link when it is the only content"
+
+#: src/shell/qml/SendPage.qml:435
+msgid "No valid link"
+msgstr "No valid link"
+
+#: src/shell/qml/SendPage.qml:441
+msgid "Send as text"
+msgstr "Send as text"
+
+#: src/shell/qml/SendPage.qml:475
+msgid "Send to"
+msgstr "Send to"
+
+#: src/shell/qml/SendPage.qml:495
+msgid "Looking for nearby devices…"
+msgstr "Looking for nearby devices…"
+
+#: src/shell/qml/SendPage.qml:510
+msgid "Choose or drop something to send, then pick a device."
+msgstr "Choose or drop something to send, then pick a device."
+
+#: src/shell/qml/SendPage.qml:571
+msgid "Paired"
+msgstr "Paired"
+
+#: src/shell/qml/SettingsPage.qml:28
+msgid "Choose the download folder"
+msgstr "Choose the download folder"
+
+#: src/shell/qml/SettingsPage.qml:49
+msgid "Visibility"
+msgstr "Visibility"
+
+#: src/shell/qml/SettingsPage.qml:56
+msgid "Device name"
+msgstr "Device name"
+
+#: src/shell/qml/SettingsPage.qml:64
+msgid "Others can find this computer and send to it"
+msgstr "Others can find this computer and send to it"
+
+#: src/shell/qml/SettingsPage.qml:71
+msgid "Hide during Do Not Disturb"
+msgstr "Hide during Do Not Disturb"
+
+#: src/shell/qml/SettingsPage.qml:72
+msgid "Not visible while Do Not Disturb is on"
+msgstr "Not visible while Do Not Disturb is on"
+
+#: src/shell/qml/SettingsPage.qml:80
+msgid "Receiving"
+msgstr "Receiving"
+
+#: src/shell/qml/SettingsPage.qml:86
+msgid "Download folder"
+msgstr "Download folder"
+
+#: src/shell/qml/SettingsPage.qml:87
+msgid "Default (Downloads)"
+msgstr "Default (Downloads)"
+
+#: src/shell/qml/SettingsPage.qml:94
+msgid "Use the default folder"
+msgstr "Use the default folder"
+
+#: src/shell/qml/SettingsPage.qml:100
+msgid "Random port"
+msgstr "Random port"
+
+#: src/shell/qml/SettingsPage.qml:101
+msgid "A different port at every start"
+msgstr "A different port at every start"
+
+#: src/shell/qml/SettingsPage.qml:115
+msgid "Fixed port"
+msgstr "Fixed port"
+
+#: src/shell/qml/SettingsPage.qml:132
+msgid ""
+"A fixed port (1024–65535) can be opened in the firewall. Changing the name "
+"or the port restarts sharing."
+msgstr ""
+"A fixed port (1024–65535) can be opened in the firewall. Changing the name "
+"or the port restarts sharing."
+
+#: src/shell/qml/SettingsPage.qml:136
+msgid "Paired devices"
+msgstr "Paired devices"
+
+#: src/shell/qml/SettingsPage.qml:149
+msgid "Fingerprint %1"
+msgstr "Fingerprint %1"
+
+#: src/shell/qml/SettingsPage.qml:160
+msgid "No paired computers yet"
+msgstr "No paired computers yet"
+
+#: src/shell/qml/SettingsPage.qml:161
+msgid "Paired computers can send to each other without asking"
+msgstr "Paired computers can send to each other without asking"
+
+#: src/shell/qml/SettingsPage.qml:165
+msgid "Pair a device…"
+msgstr "Pair a device…"
+
+#: src/shell/qml/SettingsPage.qml:172
+msgid "A paired computer can send you files without asking."
+msgstr "A paired computer can send you files without asking."
+
+#: src/shell/qml/SettingsPage.qml:182
+msgid "Trust devices"
+msgstr "Trust devices"
+
+#: src/shell/qml/SettingsPage.qml:183
+msgid "Accept transfers from trusted devices without asking"
+msgstr "Accept transfers from trusted devices without asking"
+
+#: src/shell/qml/SettingsPage.qml:197
+msgid "MAC address %1"
+msgstr "MAC address %1"
+
+#: src/shell/qml/SettingsPage.qml:208
+msgid "No devices yet"
+msgstr "No devices yet"
+
+#: src/shell/qml/SettingsPage.qml:209
+msgid "Use “Accept and trust” on an incoming transfer notification to add one"
+msgstr "Use “Accept and trust” on an incoming transfer notification to add one"
+
+#: src/shell/qml/SettingsPage.qml:216
+msgid ""
+"Matched by name and MAC address. Another device that copies both would be "
+"accepted too. Use only if you trust all devices in your LAN."
+msgstr ""
+"Matched by name and MAC address. Another device that copies both would be "
+"accepted too. Use only if you trust all devices in your LAN."
+
+#: src/shell/qml/SettingsPage.qml:222
+msgid "History"
+msgstr "History"
+
+#: src/shell/qml/SettingsPage.qml:228
+msgid "Save transfer history"
+msgstr "Save transfer history"
+
+#: src/shell/qml/SettingsPage.qml:229
+msgid "Keep a list of sent and received transfers"
+msgstr "Keep a list of sent and received transfers"
+
+#: src/shell/qml/SettingsPage.qml:252
+msgid "Delete entries after"
+msgstr "Delete entries after"
+
+#: src/shell/qml/SettingsPage.qml:261
+msgid "Never"
+msgstr "Never"
+
+#: src/shell/qml/SettingsPage.qml:261
+msgid "1 day"
+msgstr "1 day"
+
+#: src/shell/qml/SettingsPage.qml:261
+msgid "7 days"
+msgstr "7 days"
+
+#: src/shell/qml/SettingsPage.qml:261
+msgid "30 days"
+msgstr "30 days"
+
+#: src/shell/qml/SettingsPage.qml:261
+msgid "90 days"
+msgstr "90 days"
+
+#: src/shell/qml/SettingsPage.qml:270
+msgid ""
+"With the history turned off nothing is saved. Entries already saved stay "
+"until they expire or you clear them."
+msgstr ""
+"With the history turned off nothing is saved. Entries already saved stay "
+"until they expire or you clear them."
+
+#: src/shell/qml/SettingsPage.qml:274
+msgid "Startup"
+msgstr "Startup"
+
+#: src/shell/qml/SettingsPage.qml:280
+msgid "Start at login"
+msgstr "Start at login"
+
+#: src/shell/qml/SettingsPage.qml:281
+msgid "Starts hidden, in the system tray if it is shown"
+msgstr "Starts hidden, in the system tray if it is shown"
+
+#: src/shell/qml/SettingsPage.qml:287
+msgid "Integration"
+msgstr "Integration"
+
+#: src/shell/qml/SettingsPage.qml:293
+msgid "Show tray icon"
+msgstr "Show tray icon"
+
+#: src/shell/qml/SettingsPage.qml:294
+msgid "Keep KuickShare in the system tray"
+msgstr "Keep KuickShare in the system tray"
+
+#: src/shell/qml/SettingsPage.qml:301
+msgid "Dolphin context menu"
+msgstr "Dolphin context menu"
+
+#: src/shell/qml/SettingsPage.qml:302
+msgid "Add “Send with KuickShare” to the menu of files"
+msgstr "Add “Send with KuickShare” to the menu of files"
+
+#: src/shell/qml/SettingsPage.qml:311
+msgid ""
+"Without the tray icon, closing the window quits KuickShare, and nothing can "
+"be received until you open it again. At login it starts hidden: open "
+"KuickShare again to show the window."
+msgstr ""
+"Without the tray icon, closing the window quits KuickShare, and nothing can "
+"be received until you open it again. At login it starts hidden: open "
+"KuickShare again to show the window."
+
+#: src/shell/qml/SettingsPage.qml:317
+msgid "Reset preferences?"
+msgstr "Reset preferences?"
+
+#: src/shell/qml/SettingsPage.qml:318
+msgid ""
+"Every setting goes back to its default. The history and the paired and "
+"trusted devices are kept."
+msgstr ""
+"Every setting goes back to its default. The history and the paired and "
+"trusted devices are kept."
+
+#: src/shell/qml/SettingsPage.qml:324
+msgid "Reset"
+msgstr "Reset"
+
+#: src/shell/qml/SettingsPage.qml:330
+msgid "Reset preferences…"
+msgstr "Reset preferences…"
+
+#: src/shell/qml/SettingsPage.qml:331
+msgid "Go back to the default preferences"
+msgstr "Go back to the default preferences"
+
+#: src/shell/qml/ShortcutsDialog.qml:17
+msgid "Show the shortcuts"
+msgstr "Show the shortcuts"
+
+#: src/shell/qml/ShortcutsDialog.qml:19
+msgid "Paste files, an image or text from the clipboard"
+msgstr "Paste files, an image or text from the clipboard"
+
+#: src/shell/qml/ShortcutsDialog.qml:20
+msgid "Clear files and text"
+msgstr "Clear files and text"
+
+#: src/shell/qml/ShortcutsDialog.qml:21
+msgid "Close the window"
+msgstr "Close the window"
+
+#: src/shell/qml/ShortcutsDialog.qml:22
+msgid "Quit KuickShare"
+msgstr "Quit KuickShare"
+
+#: src/shell/qml/TransfersPage.qml:21
+msgid "Clear history?"
+msgstr "Clear history?"
+
+#: src/shell/qml/TransfersPage.qml:22
+msgid "Files you received are not touched."
+msgstr "Files you received are not touched."
+
+#: src/shell/qml/TransfersPage.qml:76
+msgid "Copied to clipboard"
+msgstr "Copied to clipboard"
+
+#: src/shell/qml/TransfersPage.qml:114
+msgid "Transfer details"
+msgstr "Transfer details"
+
+#: src/shell/qml/TransfersPage.qml:137
+msgid "Result"
+msgstr "Result"
+
+#: src/shell/qml/TransfersPage.qml:137
+msgid "Size"
+msgstr "Size"
+
+#: src/shell/qml/TransfersPage.qml:263
+msgid "Waiting for your approval"
+msgstr "Waiting for your approval"
+
+#: src/shell/qml/TransfersPage.qml:265
+msgid "Receiving…"
+msgstr "Receiving…"
+
+#: src/shell/qml/TransfersPage.qml:267
+msgid "Sending…"
+msgstr "Sending…"
+
+#: src/shell/qml/TransfersPage.qml:269
+msgid "Sent"
+msgstr "Sent"
+
+#: src/shell/qml/TransfersPage.qml:269
+msgid "Received"
+msgstr "Received"
+
+#: src/shell/qml/TransfersPage.qml:271
+msgid "Cancelled"
+msgstr "Cancelled"
+
+#: src/shell/qml/TransfersPage.qml:273
+msgid "Declined"
+msgstr "Declined"
+
+#: src/shell/qml/TransfersPage.qml:273
+msgid "You declined"
+msgstr "You declined"
+
+#: src/shell/qml/TransfersPage.qml:276
+msgid "Not accepted"
+msgstr "Not accepted"
+
+#: src/shell/qml/TransfersPage.qml:276
+msgid "Interrupted"
+msgstr "Interrupted"
+
+#: src/shell/qml/TransfersPage.qml:278
+msgid "Connecting…"
+msgstr "Connecting…"
+
+#: src/shell/qml/TransfersPage.qml:341
+msgid "The history is large (%1) and may slow KuickShare down."
+msgstr "The history is large (%1) and may slow KuickShare down."
+
+#: src/shell/qml/TransfersPage.qml:344 src/shell/qml/TransfersPage.qml:367
+msgid "Clear history"
+msgstr "Clear history"
+
+#: src/shell/qml/TransfersPage.qml:355
+msgid ""
+"History is turned off: new transfers are not saved. You can turn it on in "
+"Preferences."
+msgstr ""
+"History is turned off: new transfers are not saved. You can turn it on in "
+"Preferences."
+
+#: src/shell/qml/TransfersPage.qml:379
+msgid "No transfers yet"
+msgstr "No transfers yet"
+
+#: src/shell/qml/TransfersPage.qml:379
+msgid "Starting the sharing service…"
+msgstr "Starting the sharing service…"
+
+#: src/shell/qml/TransfersPage.qml:380
+msgid ""
+"Sent and received transfers are listed here. Make sure this computer is "
+"visible in Preferences to receive."
+msgstr ""
+"Sent and received transfers are listed here. Make sure this computer is "
+"visible in Preferences to receive."
+
+#: src/shell/qml/TransfersPage.qml:380
+msgid ""
+"Transfers are only listed while the app is open, because the history is "
+"turned off."
+msgstr ""
+"Transfers are only listed while the app is open, because the history is "
+"turned off."
+
+#: src/shell/qml/TransfersPage.qml:473
+msgid "Unknown device"
+msgstr "Unknown device"
+
+#: src/shell/qml/TransfersPage.qml:497
+msgid "Trusted"
+msgstr "Trusted"
+
+#: src/shell/qml/TransfersPage.qml:506
+msgid "%1%"
+msgstr "%1%"
+
+#: src/shell/qml/TransfersPage.qml:513
+msgid "Cancel"
+msgstr "Cancel"
+
+#: src/shell/qml/TransfersPage.qml:520
+msgid "Remove from list"
+msgstr "Remove from list"
+
+#: src/shell/qml/TransfersPage.qml:531
+msgid "Wants to share with you · PIN %1"
+msgstr "Wants to share with you · PIN %1"
+
+#: src/shell/qml/TransfersPage.qml:540
+msgid "More details"
+msgstr "More details"
+
+#: src/shell/qml/TransfersPage.qml:579 src/shell/transferwatcher.cpp:145
+msgid "Accept"
+msgstr "Accept"
+
+#: src/shell/qml/TransfersPage.qml:585 src/shell/transferwatcher.cpp:157
+msgid "Decline"
+msgstr "Decline"
+
+#: src/shell/qml/TransfersPage.qml:591 src/shell/transferwatcher.cpp:190
+msgid "Open folder"
+msgstr "Open folder"
+
+#: src/shell/qml/TransfersPage.qml:598 src/shell/transferwatcher.cpp:174
+msgid "Copy"
+msgstr "Copy"
+
+#: src/shell/transferjob.cpp:16
+msgid "Sending files"
+msgstr "Sending files"
+
+#: src/shell/transferjob.cpp:16
+msgid "Receiving files"
+msgstr "Receiving files"
+
+#: src/shell/transferjob.cpp:17
+msgid "To"
+msgstr "To"
+
+#: src/shell/transferjob.cpp:17
+msgid "From"
+msgstr "From"
+
+#: src/shell/transferjob.cpp:18
+msgid "Files"
+msgstr "Files"
+
+#: src/shell/transferjob.cpp:49
+msgid "The transfer was interrupted"
+msgstr "The transfer was interrupted"
+
+#: src/shell/transferwatcher.cpp:120
+msgid "a nearby device"
+msgstr "a nearby device"
+
+#: src/shell/transferwatcher.cpp:129
+msgid "Transfer not accepted"
+msgstr "Transfer not accepted"
+
+#: src/shell/transferwatcher.cpp:129
+msgid "%1 declined the transfer or could not receive it"
+msgstr "%1 declined the transfer or could not receive it"
+
+#: src/shell/transferwatcher.cpp:133
+msgid "Transfer interrupted"
+msgstr "Transfer interrupted"
+
+#: src/shell/transferwatcher.cpp:133
+msgid "The connection with %1 was lost"
+msgstr "The connection with %1 was lost"
+
+#: src/shell/transferwatcher.cpp:141
+msgid "Incoming transfer"
+msgstr "Incoming transfer"
+
+#: src/shell/transferwatcher.cpp:142
+msgid "A nearby device"
+msgstr "A nearby device"
+
+#: src/shell/transferwatcher.cpp:143
+msgid "%1 wants to share with you"
+msgstr "%1 wants to share with you"
+
+#: src/shell/transferwatcher.cpp:143
+msgid ""
+"%1 wants to share with you\n"
+"PIN: %2"
+msgstr ""
+"%1 wants to share with you\n"
+"PIN: %2"
+
+#: src/shell/transferwatcher.cpp:151
+msgid "Accept and trust"
+msgstr "Accept and trust"
+
+#: src/shell/transferwatcher.cpp:172
+msgid "Text received"
+msgstr "Text received"
+
+#: src/shell/transferwatcher.cpp:173
+msgid ""
+"From %1:\n"
+"%2"
+msgstr ""
+"From %1:\n"
+"%2"
+
+#: src/shell/transferwatcher.cpp:180
+msgid "Open link"
+msgstr "Open link"
+
+#: src/shell/transferwatcher.cpp:188
+msgid "Files received"
+msgstr "Files received"
+
+#: src/shell/transferwatcher.cpp:189
+msgid "From %1"
+msgstr "From %1"

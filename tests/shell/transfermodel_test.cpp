@@ -1,0 +1,107 @@
+#include <QtTest>
+
+#include "transfermodel.h"
+
+class TransferModelTest : public QObject
+{
+    Q_OBJECT
+
+private:
+    static QVariantMap event(const QString &state, const QString &device = {})
+    {
+        return {{QStringLiteral("state"), state}, {QStringLiteral("device"), device}};
+    }
+    static QString stateAt(const TransferModel &model, int row)
+    {
+        return model.data(model.index(row), TransferModel::StateRole).toString();
+    }
+
+private Q_SLOTS:
+    void updatesMergeAndKeepKnownFields()
+    {
+        TransferModel model;
+        model.update(QStringLiteral("a"), event(QStringLiteral("SendingFiles"), QStringLiteral("Pixel")));
+        model.update(QStringLiteral("a"), event(QStringLiteral("SendingFiles"))); // device now empty
+        QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(model.info(QStringLiteral("a")).value(QStringLiteral("device")).toString(), QStringLiteral("Pixel"));
+    }
+
+    void finishedTransferIsRestartedAsNewRow()
+    {
+        TransferModel model;
+        model.update(QStringLiteral("a"), event(QStringLiteral("Finished")));
+        model.update(QStringLiteral("a"), event(QStringLiteral("SendingFiles"))); // same id, new transfer
+        QCOMPARE(model.rowCount(), 2);
+        QCOMPARE(stateAt(model, 0), QStringLiteral("SendingFiles"));
+        QCOMPARE(stateAt(model, 1), QStringLiteral("Finished"));
+        QCOMPARE(model.info(QStringLiteral("a")).value(QStringLiteral("state")).toString(), QStringLiteral("SendingFiles"));
+    }
+
+    void historyIsAppendedBelowLiveTransfers()
+    {
+        TransferModel model;
+        model.addHistory(event(QStringLiteral("Finished"), QStringLiteral("old")));
+        model.update(QStringLiteral("live"), event(QStringLiteral("SendingFiles"), QStringLiteral("now")));
+        QCOMPARE(model.rowCount(), 2);
+        QCOMPARE(stateAt(model, 0), QStringLiteral("SendingFiles"));
+        QCOMPARE(stateAt(model, 1), QStringLiteral("Finished"));
+    }
+
+    void clearFinishedKeepsActiveTransfers()
+    {
+        TransferModel model;
+        model.addHistory(event(QStringLiteral("Finished")));
+        model.addHistory(event(QStringLiteral("Disconnected")));
+        model.update(QStringLiteral("live"), event(QStringLiteral("ReceivingFiles")));
+        model.clearFinished();
+        QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(stateAt(model, 0), QStringLiteral("ReceivingFiles"));
+    }
+
+    void filesRoleSplitsOnNewlines()
+    {
+        TransferModel model;
+        QVariantMap info = event(QStringLiteral("Finished"));
+        info.insert(QStringLiteral("files"), QStringLiteral("a.mp4\nb.pdf"));
+        model.addHistory(info);
+        QCOMPARE(model.data(model.index(0), TransferModel::FilesRole).toStringList(), (QStringList{QStringLiteral("a.mp4"), QStringLiteral("b.pdf")}));
+    }
+
+    void onlySendingOrReceivingCountsAsActive()
+    {
+        TransferModel model;
+        QVERIFY(!model.hasActive());
+        model.update(QStringLiteral("a"), event(QStringLiteral("WaitingForUserConsent")));
+        QVERIFY(!model.hasActive()); // waiting for the user is not a transfer in progress
+        model.update(QStringLiteral("b"), event(QStringLiteral("ReceivingFiles")));
+        QVERIFY(model.hasActive());
+        model.update(QStringLiteral("b"), event(QStringLiteral("Finished")));
+        QVERIFY(!model.hasActive());
+        model.update(QStringLiteral("c"), event(QStringLiteral("SendingFiles")));
+        QVERIFY(model.hasActive());
+    }
+
+    void removeDeletesOneRowAndIgnoresUnknownIds()
+    {
+        TransferModel model;
+        model.update(QStringLiteral("a"), event(QStringLiteral("Finished"), QStringLiteral("Pixel")));
+        model.update(QStringLiteral("b"), event(QStringLiteral("Finished"), QStringLiteral("Tab")));
+        model.remove(QStringLiteral("nope"));
+        QCOMPARE(model.rowCount(), 2);
+        model.remove(QStringLiteral("a"));
+        QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(model.data(model.index(0), TransferModel::DeviceRole).toString(), QStringLiteral("Tab"));
+    }
+
+    void secondFinalStateIsIgnored()
+    {
+        TransferModel model;
+        model.update(QStringLiteral("a"), event(QStringLiteral("Finished")));
+        model.update(QStringLiteral("a"), event(QStringLiteral("Disconnected")));
+        QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(stateAt(model, 0), QStringLiteral("Finished"));
+    }
+};
+
+QTEST_APPLESS_MAIN(TransferModelTest)
+#include "transfermodel_test.moc"

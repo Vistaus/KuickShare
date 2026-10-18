@@ -1,0 +1,5 @@
+#!/bin/sh
+here=$(dirname "$(readlink -f "$0")")
+APPDIR=${APPDIR:-$here}
+export APPDIR
+exec "$here/usr/share/kuickshare/install.sh" "$@"

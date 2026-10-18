@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.the_beper.KuickShare</id>
+  <name>KuickShare</name>
+  <summary>Share files with nearby devices using Quick Share</summary>
+  <developer id="io.github.the_beper">
+    <name>the-beper</name>
+  </developer>
+  <url type="homepage">https://github.com/the-beper/KuickShare</url>
+  <url type="bugtracker">https://github.com/the-beper/KuickShare/issues</url>
+  <url type="vcs-browser">https://github.com/the-beper/KuickShare</url>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>KuickShare is a KDE-native Quick Share client for Linux. It lets you send files to and receive files from nearby Android devices and other Quick Share clients.</p>
+    <p>It is derived from Packet and uses a Rust background service for the protocol and a Qt 6 / Kirigami interface that follows the Breeze look.</p>
+    <ul>
+      <li>Send files to nearby devices and receive files from them</li>
+      <li>Tray icon, desktop notifications and job progress in Plasma</li>
+      <li>Dolphin context menu entry to send files</li>
+      <li>Transfer history and trusted devices</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.the_beper.KuickShare.desktop</launchable>
+  <provides>
+    <binary>kuickshare</binary>
+  </provides>
+  <categories>
+    <category>Network</category>
+    <category>FileTransfer</category>
+    <category>Qt</category>
+    <category>KDE</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <requires>
+    <display_length compare="ge">360</display_length>
+    <internet>always</internet>
+  </requires>
+  <recommends>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </recommends>
+  <releases>
+    <release version="1.0.0" date="2026-10-18"/>
+  </releases>
+</component>

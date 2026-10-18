@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:44
+    steps:
+      - name: Install system packages
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            gcc gcc-c++ make cmake ninja-build pkgconf-pkg-config git \
+            dbus-devel dbus-daemon protobuf-compiler squashfs-tools curl \
+            qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel \
+            extra-cmake-modules \
+            kf6-kirigami-devel kf6-kstatusnotifieritem-devel kf6-knotifications-devel \
+            kf6-ki18n-devel kf6-kconfig-devel kf6-kcoreaddons-devel kf6-kdbusaddons-devel \
+            kf6-kio-devel kf6-kiconthemes-devel kf6-kirigami-addons
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Rust (stable)
+        run: |
+          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build AppImage
+        run: |
+          touch /run/.containerenv
+          build/build-appimage.sh
+
+      - name: Check the tag matches the built version
+        run: |
+          file=$(ls dist/KuickShare-*-x86_64.AppImage)
+          test "$file" = "dist/KuickShare-${GITHUB_REF_NAME#v}-x86_64.AppImage"
+
+      - name: Checksum
+        run: |
+          cd dist
+          sha256sum KuickShare-*-x86_64.AppImage > SHA256SUMS
+
+      - uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+        with:
+          files: |
+            dist/KuickShare-*-x86_64.AppImage
+            dist/SHA256SUMS

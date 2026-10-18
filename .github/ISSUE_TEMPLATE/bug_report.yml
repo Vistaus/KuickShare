@@ -1,0 +1,31 @@
+name: Bug report
+description: Something does not work as expected
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you got.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: KuickShare version
+      description: Help → About.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Fedora and Plasma versions, and the phone or device you were sharing with.
+      placeholder: "Fedora 44, Plasma 6.x, Pixel 7 (Android 16)"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: "Optional. Start the service by hand with `RUST_LOG=debug ~/.local/share/kuickshare/bin/kuickshared` and paste what it prints around the problem."
+      render: shell

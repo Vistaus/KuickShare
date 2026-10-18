@@ -1,0 +1,322 @@
+# Third-party software
+
+KuickShare is GPL-3.0-or-later (see [LICENSE](LICENSE)). It builds on the projects below.
+
+## Origin
+
+| Project | License | Role |
+| --- | --- | --- |
+| [Packet](https://github.com/nozwock/packet) | GPL-3.0-or-later | KuickShare is derived from it |
+| [rquickshare / `rqs_lib`](https://github.com/nozwock/rquickshare) | GPL-3.0 | Quick Share protocol implementation, used as a Rust dependency (git rev pinned in `Cargo.toml`) |
+
+## System software (not bundled)
+
+The shell uses these from the host; the AppImage does not ship them, and the installer checks that they are present.
+
+| Software | License |
+| --- | --- |
+| Qt 6 (Base, Declarative, SVG) | LGPL-3.0 (modules also available under GPL) |
+| KDE Frameworks 6 (KI18n, KConfig, KCoreAddons, KDBusAddons, KIO, KIconThemes, KNotifications, KStatusNotifierItem) | mostly LGPL-2.0-or-later / LGPL-2.1-or-later; see each framework |
+| Kirigami | LGPL-2.0-or-later |
+| kirigami-addons | LGPL-2.0-or-later (some parts GPL/MIT; unverified per file) |
+| Breeze icon theme | LGPL-3.0-or-later |
+
+Icons are referenced by theme name and resolved from the system Breeze theme at run time; none are copied into this repository except KuickShare's own app icon.
+
+## Rust crates
+
+The AppImage contains only the two binaries `kuickshare` and `kuickshared` (see [`build/build-appimage.sh`](build/build-appimage.sh)). All crates below are statically linked into `kuickshared`.
+
+The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal (non-dev, non-build-only) dependencies reachable from `kuickshare-core`, and covers all target platforms, so a few entries may not be compiled on Linux. Licenses are the SPDX expressions declared by each crate.
+
+> [!WARNING]
+> `sys_metrics` (pulled in by `rqs_lib`) declares **AGPL-3.0**. It is compatible with the GPL-3.0-or-later of this project (GPLv3 section 13) but it is not permissive: keep it in mind when relicensing or redistributing.
+
+### Direct dependencies
+
+| Crate | Version | License |
+| --- | --- | --- |
+| anyhow | 1.0.104 | MIT OR Apache-2.0 |
+| dirs | 7.0.0 | MIT OR Apache-2.0 |
+| hex | 0.4.3 | MIT OR Apache-2.0 |
+| rqs_lib | 0.11.5 | GPL-3.0 (repository LICENSE; the crate has no license field) |
+| serde | 1.0.229 | MIT OR Apache-2.0 |
+| serde_json | 1.0.154 | MIT OR Apache-2.0 |
+| sha2 | 0.10.9 | MIT OR Apache-2.0 |
+| sha2 | 0.11.1 | MIT OR Apache-2.0 |
+| snow | 0.10.0 | Apache-2.0 OR MIT |
+| tokio | 1.53.3 | MIT |
+| tracing | 0.1.44 | MIT |
+| tracing-subscriber | 0.3.23 | MIT |
+| zbus | 6.0.0 | MIT |
+
+### Transitive dependencies
+
+<details>
+<summary>261 crates</summary>
+
+| Crate | Version | License |
+| --- | --- | --- |
+| aead | 0.5.2 | MIT OR Apache-2.0 |
+| aes | 0.8.4 | MIT OR Apache-2.0 |
+| aes-gcm | 0.10.3 | Apache-2.0 OR MIT |
+| aho-corasick | 1.1.5 | Unlicense OR MIT |
+| async-trait | 0.1.92 | MIT OR Apache-2.0 |
+| base16ct | 0.2.0 | Apache-2.0 OR MIT |
+| base64 | 0.22.1 | MIT OR Apache-2.0 |
+| base64ct | 1.8.3 | Apache-2.0 OR MIT |
+| bitflags | 1.3.2 | MIT/Apache-2.0 |
+| bitflags | 2.13.2 | MIT OR Apache-2.0 |
+| blake2 | 0.10.6 | MIT OR Apache-2.0 |
+| block-buffer | 0.10.4 | MIT OR Apache-2.0 |
+| block-buffer | 0.12.1 | MIT OR Apache-2.0 |
+| block2 | 0.5.1 | MIT |
+| bluer | 0.17.4 | BSD-2-Clause |
+| bluez-async | 0.8.2 | MIT OR Apache-2.0 |
+| bluez-generated | 0.4.0 | MIT OR Apache-2.0 |
+| btleplug | 0.11.8 | MIT/Apache-2.0/BSD-3-Clause |
+| bumpalo | 3.20.3 | MIT OR Apache-2.0 |
+| bytes | 1.12.1 | MIT |
+| c_linked_list | 1.1.1 | MIT OR BSD-3-Clause |
+| cesu8 | 1.1.0 | Apache-2.0/MIT |
+| cfg-if | 1.0.5 | MIT OR Apache-2.0 |
+| chacha20 | 0.9.1 | Apache-2.0 OR MIT |
+| chacha20poly1305 | 0.10.1 | Apache-2.0 OR MIT |
+| cipher | 0.4.4 | MIT OR Apache-2.0 |
+| combine | 4.6.9 | MIT |
+| concurrent-queue | 2.5.0 | Apache-2.0 OR MIT |
+| const-oid | 0.10.2 | Apache-2.0 OR MIT |
+| const-oid | 0.9.6 | Apache-2.0 OR MIT |
+| core-foundation-sys | 0.8.7 | MIT OR Apache-2.0 |
+| cpufeatures | 0.2.17 | MIT OR Apache-2.0 |
+| cpufeatures | 0.3.1 | MIT OR Apache-2.0 |
+| crossbeam-utils | 0.8.23 | MIT OR Apache-2.0 |
+| crypto-bigint | 0.5.5 | Apache-2.0 OR MIT |
+| crypto-common | 0.1.7 | MIT OR Apache-2.0 |
+| crypto-common | 0.2.2 | MIT OR Apache-2.0 |
+| ctr | 0.9.2 | MIT OR Apache-2.0 |
+| curve25519-dalek | 4.1.3 | BSD-3-Clause |
+| curve25519-dalek-derive | 0.1.1 | MIT/Apache-2.0 |
+| custom_debug | 0.6.2 | Apache-2.0 OR MIT |
+| custom_debug_derive | 0.6.2 | Apache-2.0 OR MIT |
+| darling | 0.20.11 | MIT |
+| darling_core | 0.20.11 | MIT |
+| darling_macro | 0.20.11 | MIT |
+| dashmap | 5.5.3 | MIT |
+| dashmap | 6.2.1 | MIT |
+| dbus | 0.9.12 | Apache-2.0/MIT |
+| dbus-crossroads | 0.5.3 | Apache-2.0/MIT |
+| dbus-tokio | 0.7.6 | Apache-2.0/MIT |
+| der | 0.7.10 | Apache-2.0 OR MIT |
+| digest | 0.10.7 | MIT OR Apache-2.0 |
+| digest | 0.11.3 | MIT OR Apache-2.0 |
+| directories | 6.0.0 | MIT OR Apache-2.0 |
+| dirs-sys | 0.5.0 | MIT OR Apache-2.0 |
+| displaydoc | 0.2.7 | MIT OR Apache-2.0 |
+| ecdsa | 0.16.9 | Apache-2.0 OR MIT |
+| either | 1.19.0 | MIT OR Apache-2.0 |
+| elliptic-curve | 0.13.8 | Apache-2.0 OR MIT |
+| endi | 1.1.1 | MIT |
+| errno | 0.3.14 | MIT OR Apache-2.0 |
+| fastrand | 2.5.0 | Apache-2.0 OR MIT |
+| ff | 0.13.1 | MIT/Apache-2.0 |
+| fiat-crypto | 0.2.9 | MIT OR Apache-2.0 OR BSD-1-Clause |
+| flume | 0.11.1 | Apache-2.0/MIT |
+| fnv | 1.0.7 | Apache-2.0 / MIT |
+| futures | 0.3.34 | MIT OR Apache-2.0 |
+| futures-channel | 0.3.34 | MIT OR Apache-2.0 |
+| futures-core | 0.3.34 | MIT OR Apache-2.0 |
+| futures-executor | 0.3.34 | MIT OR Apache-2.0 |
+| futures-io | 0.3.34 | MIT OR Apache-2.0 |
+| futures-macro | 0.3.34 | MIT OR Apache-2.0 |
+| futures-sink | 0.3.34 | MIT OR Apache-2.0 |
+| futures-task | 0.3.34 | MIT OR Apache-2.0 |
+| futures-util | 0.3.34 | MIT OR Apache-2.0 |
+| generic-array | 0.14.7 | MIT |
+| get_if_addrs | 0.5.3 | MIT OR BSD-3-Clause |
+| get_if_addrs-sys | 0.1.1 | MIT OR BSD-3-Clause |
+| getrandom | 0.4.3 | MIT OR Apache-2.0 |
+| getrandom | 0.3.4 | MIT OR Apache-2.0 |
+| getrandom | 0.2.17 | MIT OR Apache-2.0 |
+| ghash | 0.5.1 | Apache-2.0 OR MIT |
+| glob | 0.3.4 | MIT OR Apache-2.0 |
+| group | 0.13.0 | MIT/Apache-2.0 |
+| hashbrown | 0.14.5 | MIT OR Apache-2.0 |
+| heck | 0.5.0 | MIT OR Apache-2.0 |
+| hkdf | 0.12.4 | MIT OR Apache-2.0 |
+| hmac | 0.12.1 | MIT OR Apache-2.0 |
+| hybrid-array | 0.4.15 | MIT OR Apache-2.0 |
+| ident_case | 1.0.1 | MIT/Apache-2.0 |
+| if-addrs | 0.10.2 | MIT OR BSD-3-Clause |
+| inout | 0.1.4 | MIT OR Apache-2.0 |
+| io-kit-sys | 0.3.0 | MIT / Apache-2.0 |
+| itertools | 0.14.0 | MIT OR Apache-2.0 |
+| itoa | 1.0.18 | MIT OR Apache-2.0 |
+| jni | 0.19.0 | MIT/Apache-2.0 |
+| jni-sys | 0.3.1 | MIT OR Apache-2.0 |
+| jni-sys | 0.4.1 | MIT OR Apache-2.0 |
+| jni-sys-macros | 0.4.1 | MIT OR Apache-2.0 |
+| jni-utils | 0.1.1 | BSD-3-Clause |
+| js-sys | 0.3.106 | MIT OR Apache-2.0 |
+| lazy_static | 1.5.1 | MIT OR Apache-2.0 |
+| libaes | 0.7.0 | Apache-2.0 OR MIT |
+| libc | 0.2.191 | MIT OR Apache-2.0 |
+| libdbus-sys | 0.2.7 | Apache-2.0/MIT |
+| libredox | 0.1.25 | MIT |
+| linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| lock_api | 0.4.14 | MIT OR Apache-2.0 |
+| log | 0.4.34 | MIT OR Apache-2.0 |
+| macaddr | 1.0.1 | Apache-2.0 OR MIT |
+| mach | 0.3.2 | BSD-2-Clause |
+| mach2 | 0.4.3 | BSD-2-Clause OR MIT OR Apache-2.0 |
+| matchers | 0.2.0 | MIT |
+| mdns-sd | 0.10.4 | Apache-2.0 OR MIT (git: rquickshare dependency) |
+| memchr | 2.8.3 | Unlicense OR MIT |
+| memoffset | 0.9.1 | MIT |
+| mime | 0.3.17 | MIT OR Apache-2.0 |
+| mime_guess | 2.0.5 | MIT |
+| mio | 1.2.4 | MIT |
+| nix | 0.29.0 | MIT |
+| nu-ansi-term | 0.50.3 | MIT |
+| num-bigint | 0.4.8 | MIT OR Apache-2.0 |
+| num-derive | 0.4.2 | MIT OR Apache-2.0 |
+| num-integer | 0.1.47 | MIT OR Apache-2.0 |
+| num-traits | 0.2.19 | MIT OR Apache-2.0 |
+| objc-sys | 0.3.5 | MIT |
+| objc2 | 0.5.3 | MIT |
+| objc2-core-bluetooth | 0.2.2 | MIT |
+| objc2-encode | 4.1.0 | MIT |
+| objc2-foundation | 0.2.2 | MIT |
+| once_cell | 1.21.4 | MIT OR Apache-2.0 |
+| opaque-debug | 0.3.1 | MIT OR Apache-2.0 |
+| option-ext | 0.2.0 | MPL-2.0 |
+| ordered-stream | 0.2.0 | MIT OR Apache-2.0 |
+| p256 | 0.13.2 | Apache-2.0 OR MIT |
+| parking_lot_core | 0.9.12 | MIT OR Apache-2.0 |
+| pem-rfc7468 | 0.7.0 | Apache-2.0 OR MIT |
+| pin-project | 1.1.13 | Apache-2.0 OR MIT |
+| pin-project-internal | 1.1.13 | Apache-2.0 OR MIT |
+| pin-project-lite | 0.2.17 | Apache-2.0 OR MIT |
+| pkcs8 | 0.10.2 | Apache-2.0 OR MIT |
+| polling | 2.8.0 | Apache-2.0 OR MIT |
+| poly1305 | 0.8.0 | Apache-2.0 OR MIT |
+| polyval | 0.6.2 | Apache-2.0 OR MIT |
+| ppv-lite86 | 0.2.21 | MIT OR Apache-2.0 |
+| primeorder | 0.13.6 | Apache-2.0 OR MIT |
+| proc-macro2 | 1.0.107 | MIT OR Apache-2.0 |
+| prost | 0.13.5 | Apache-2.0 |
+| prost-derive | 0.13.5 | Apache-2.0 |
+| quote | 1.0.47 | MIT OR Apache-2.0 |
+| r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
+| r-efi | 5.3.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
+| rand | 0.9.5 | MIT OR Apache-2.0 |
+| rand_chacha | 0.9.0 | MIT OR Apache-2.0 |
+| rand_core | 0.9.5 | MIT OR Apache-2.0 |
+| rand_core | 0.6.4 | MIT OR Apache-2.0 |
+| redox_syscall | 0.5.18 | MIT |
+| redox_users | 0.5.3 | MIT |
+| regex-automata | 0.4.18 | MIT OR Apache-2.0 |
+| regex-syntax | 0.8.11 | MIT OR Apache-2.0 |
+| rfc6979 | 0.4.0 | Apache-2.0 OR MIT |
+| ring | 0.17.14 | Apache-2.0 AND ISC |
+| rustix | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| rustversion | 1.0.23 | MIT OR Apache-2.0 |
+| scopeguard | 1.2.0 | MIT OR Apache-2.0 |
+| sec1 | 0.7.3 | Apache-2.0 OR MIT |
+| serde-xml-rs | 0.8.2 | MIT |
+| serde_core | 1.0.229 | MIT OR Apache-2.0 |
+| serde_derive | 1.0.229 | MIT OR Apache-2.0 |
+| serde_repr | 0.1.21 | MIT OR Apache-2.0 |
+| sharded-slab | 0.1.7 | MIT |
+| signal-hook-registry | 1.4.8 | MIT OR Apache-2.0 |
+| signature | 2.2.0 | Apache-2.0 OR MIT |
+| slab | 0.4.12 | MIT |
+| smallvec | 1.16.3 | MIT OR Apache-2.0 |
+| socket2 | 0.4.10 | MIT OR Apache-2.0 |
+| socket2 | 0.6.5 | MIT OR Apache-2.0 |
+| spin | 0.9.9 | MIT |
+| spki | 0.7.3 | Apache-2.0 OR MIT |
+| static_assertions | 1.1.0 | MIT OR Apache-2.0 |
+| strsim | 0.11.1 | MIT |
+| strum | 0.26.3 | MIT |
+| strum_macros | 0.26.4 | MIT |
+| subtle | 2.6.1 | BSD-3-Clause |
+| syn | 3.0.9 | MIT OR Apache-2.0 |
+| syn | 2.0.119 | MIT OR Apache-2.0 |
+| synstructure | 0.13.2 | MIT |
+| sys_metrics | 0.2.7 | AGPL-3.0 (git: rquickshare dependency) |
+| tempfile | 3.27.0 | MIT OR Apache-2.0 |
+| thiserror | 2.0.21 | MIT OR Apache-2.0 |
+| thiserror | 1.0.69 | MIT OR Apache-2.0 |
+| thiserror-impl | 1.0.69 | MIT OR Apache-2.0 |
+| thiserror-impl | 2.0.21 | MIT OR Apache-2.0 |
+| thread_local | 1.1.10 | MIT OR Apache-2.0 |
+| tokio-macros | 2.7.2 | MIT |
+| tokio-stream | 0.1.19 | MIT |
+| tokio-util | 0.7.20 | MIT |
+| tracing-attributes | 0.1.31 | MIT |
+| tracing-core | 0.1.36 | MIT |
+| tracing-log | 0.2.0 | MIT |
+| typenum | 1.20.1 | MIT OR Apache-2.0 |
+| uds_windows | 1.2.1 | MIT |
+| unicase | 2.10.0 | MIT OR Apache-2.0 |
+| unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 |
+| universal-hash | 0.5.1 | MIT OR Apache-2.0 |
+| untrusted | 0.9.0 | ISC |
+| uuid | 1.28.0 | Apache-2.0 OR MIT |
+| valuable | 0.1.1 | MIT |
+| wasi | 0.11.1+wasi-snapshot-preview1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| wasip2 | 1.0.4+wasi-0.2.12 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| wasm-bindgen | 0.2.129 | MIT OR Apache-2.0 |
+| wasm-bindgen-macro | 0.2.129 | MIT OR Apache-2.0 |
+| wasm-bindgen-macro-support | 0.2.129 | MIT OR Apache-2.0 |
+| wasm-bindgen-shared | 0.2.129 | MIT OR Apache-2.0 |
+| winapi | 0.3.9 | MIT/Apache-2.0 |
+| winapi | 0.2.8 | MIT |
+| winapi-i686-pc-windows-gnu | 0.4.0 | MIT/Apache-2.0 |
+| winapi-x86_64-pc-windows-gnu | 0.4.0 | MIT/Apache-2.0 |
+| windows | 0.61.3 | MIT OR Apache-2.0 |
+| windows-collections | 0.2.0 | MIT OR Apache-2.0 |
+| windows-core | 0.61.2 | MIT OR Apache-2.0 |
+| windows-future | 0.2.1 | MIT OR Apache-2.0 |
+| windows-implement | 0.60.2 | MIT OR Apache-2.0 |
+| windows-interface | 0.59.3 | MIT OR Apache-2.0 |
+| windows-link | 0.2.1 | MIT OR Apache-2.0 |
+| windows-link | 0.1.3 | MIT OR Apache-2.0 |
+| windows-numerics | 0.2.0 | MIT OR Apache-2.0 |
+| windows-result | 0.3.4 | MIT OR Apache-2.0 |
+| windows-strings | 0.4.2 | MIT OR Apache-2.0 |
+| windows-sys | 0.52.0 | MIT OR Apache-2.0 |
+| windows-sys | 0.48.0 | MIT OR Apache-2.0 |
+| windows-sys | 0.61.2 | MIT OR Apache-2.0 |
+| windows-targets | 0.48.5 | MIT OR Apache-2.0 |
+| windows-targets | 0.52.6 | MIT OR Apache-2.0 |
+| windows-threading | 0.1.0 | MIT OR Apache-2.0 |
+| windows_aarch64_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
+| windows_aarch64_gnullvm | 0.48.5 | MIT OR Apache-2.0 |
+| windows_aarch64_msvc | 0.48.5 | MIT OR Apache-2.0 |
+| windows_aarch64_msvc | 0.52.6 | MIT OR Apache-2.0 |
+| windows_i686_gnu | 0.52.6 | MIT OR Apache-2.0 |
+| windows_i686_gnu | 0.48.5 | MIT OR Apache-2.0 |
+| windows_i686_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
+| windows_i686_msvc | 0.52.6 | MIT OR Apache-2.0 |
+| windows_i686_msvc | 0.48.5 | MIT OR Apache-2.0 |
+| windows_x86_64_gnu | 0.52.6 | MIT OR Apache-2.0 |
+| windows_x86_64_gnu | 0.48.5 | MIT OR Apache-2.0 |
+| windows_x86_64_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
+| windows_x86_64_gnullvm | 0.48.5 | MIT OR Apache-2.0 |
+| windows_x86_64_msvc | 0.52.6 | MIT OR Apache-2.0 |
+| windows_x86_64_msvc | 0.48.5 | MIT OR Apache-2.0 |
+| winnow | 1.0.4 | MIT |
+| wit-bindgen | 0.57.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+| xml | 1.4.0 | MIT |
+| zbus_macros | 6.0.0 | MIT |
+| zbus_utils | 6.0.0 | MIT |
+| zcheapstr | 1.1.0 | MIT |
+| zerocopy | 0.8.63 | BSD-2-Clause OR Apache-2.0 OR MIT |
+| zerocopy-derive | 0.8.63 | BSD-2-Clause OR Apache-2.0 OR MIT |
+| zeroize | 1.9.1 | Apache-2.0 OR MIT |
+| zmij | 1.0.23 | MIT |
+| zruntime | 0.2.0 | MIT |
+
+</details>

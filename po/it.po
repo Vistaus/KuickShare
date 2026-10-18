@@ -1,0 +1,952 @@
+# Italian translation of kuickshare.
+# This file is distributed under the same license as the kuickshare package.
+# the-beper <193650145+the-beper@users.noreply.github.com>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: kuickshare 1.0.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-18 19:52+0000\n"
+"PO-Revision-Date: 2026-10-18 00:00+0000\n"
+"Last-Translator: the-beper <193650145+the-beper@users.noreply.github.com>\n"
+"Language-Team: Italian\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/shell/corebridge.cpp:473
+msgid "Could not update Dolphin's context menu"
+msgstr "Impossibile aggiornare il menu contestuale di Dolphin"
+
+#: src/shell/corebridge.cpp:602
+msgid "Could not update the autostart entry"
+msgstr "Impossibile aggiornare la voce di avvio automatico"
+
+#: src/shell/corebridge.cpp:687
+msgid "Only files can be shared, folders are not supported"
+msgstr "È possibile condividere solo file, le cartelle non sono supportate"
+
+#: src/shell/main.cpp:37 src/shell/qml/AboutDialog.qml:136
+msgid "Quick Share client for KDE"
+msgstr "Client Quick Share per KDE"
+
+#: src/shell/main.cpp:46
+msgid "Start hidden in the system tray"
+msgstr "Avvia nascosto nell'area di notifica"
+
+#: src/shell/main.cpp:47
+msgid "Open the given page: send, transfers, settings or help"
+msgstr "Apre la pagina indicata: send, transfers, settings o help"
+
+#: src/shell/main.cpp:53 src/shell/qml/SendPage.qml:149
+msgid "Files to send"
+msgstr "File da inviare"
+
+#: src/shell/main.cpp:147
+msgid "Open KuickShare"
+msgstr "Apri KuickShare"
+
+#: src/shell/main.cpp:149
+msgid "Send files…"
+msgstr "Invia file…"
+
+#: src/shell/main.cpp:150
+msgid "Send clipboard"
+msgstr "Invia appunti"
+
+#: src/shell/main.cpp:151 src/shell/qml/SettingsPage.qml:63
+msgid "Visible to nearby devices"
+msgstr "Visibile ai dispositivi vicini"
+
+#: src/shell/main.cpp:158 src/shell/qml/Main.qml:228
+#: src/shell/qml/SettingsPage.qml:13 src/shell/qml/ShortcutsDialog.qml:14
+msgid "Preferences"
+msgstr "Preferenze"
+
+#: src/shell/main.cpp:159 src/shell/qml/Main.qml:242
+msgid "Quit"
+msgstr "Esci"
+
+#: src/shell/qml/AboutDialog.qml:69 src/shell/qml/Main.qml:256
+msgid "About"
+msgstr "Informazioni"
+
+#: src/shell/qml/AboutDialog.qml:92 src/shell/qml/PairDialog.qml:69
+#: src/shell/qml/ShortcutsDialog.qml:61
+msgid "Close"
+msgstr "Chiudi"
+
+#: src/shell/qml/AboutDialog.qml:133
+msgid "KuickShare %1"
+msgstr "KuickShare %1"
+
+#: src/shell/qml/AboutDialog.qml:151
+msgid "Copyright"
+msgstr "Copyright"
+
+#: src/shell/qml/AboutDialog.qml:160
+msgid "Homepage"
+msgstr "Sito web"
+
+#: src/shell/qml/AboutDialog.qml:164
+msgid "Report a Bug"
+msgstr "Segnala un problema"
+
+#: src/shell/qml/AboutDialog.qml:169
+msgid "License"
+msgstr "Licenza"
+
+#: src/shell/qml/AboutDialog.qml:173
+msgid "GPL-3.0-or-later"
+msgstr "GPL-3.0-or-later"
+
+#: src/shell/qml/AboutDialog.qml:178
+msgid "Built on"
+msgstr "Basato su"
+
+#: src/shell/qml/AboutDialog.qml:182
+msgid "Packet"
+msgstr "Packet"
+
+#: src/shell/qml/AboutDialog.qml:183
+msgid "The Quick Share client this started from, by nozwock"
+msgstr "Il client Quick Share da cui è partito il progetto, di nozwock"
+
+#: src/shell/qml/AboutDialog.qml:187
+msgid "rquickshare"
+msgstr "rquickshare"
+
+#: src/shell/qml/AboutDialog.qml:188
+msgid "The Quick Share protocol library (rqs_lib), by nozwock and Martichou"
+msgstr ""
+"La libreria del protocollo Quick Share (rqs_lib), di nozwock e Martichou"
+
+#: src/shell/qml/AboutDialog.qml:193
+msgid "Libraries in use"
+msgstr "Librerie in uso"
+
+#: src/shell/qml/AboutDialog.qml:197
+msgid "Qt %1"
+msgstr "Qt %1"
+
+#: src/shell/qml/AboutDialog.qml:198
+msgid "Cross-platform application framework"
+msgstr "Framework multipiattaforma per applicazioni"
+
+#: src/shell/qml/AboutDialog.qml:201
+msgid "KDE Frameworks %1"
+msgstr "KDE Frameworks %1"
+
+#: src/shell/qml/AboutDialog.qml:202
+msgid "Kirigami, notifications, jobs and the other KDE libraries"
+msgstr "Kirigami, notifiche, attività e le altre librerie KDE"
+
+#: src/shell/qml/HelpPage.qml:12 src/shell/qml/Main.qml:249
+#: src/shell/qml/ShortcutsDialog.qml:15 src/shell/qml/ShortcutsDialog.qml:16
+msgid "Help"
+msgstr "Aiuto"
+
+#: src/shell/qml/HelpPage.qml:26
+msgid "Getting started"
+msgstr "Per iniziare"
+
+#: src/shell/qml/HelpPage.qml:32 src/shell/qml/Main.qml:184
+#: src/shell/qml/SendPage.qml:39 src/shell/qml/ShortcutsDialog.qml:12
+msgid "Send"
+msgstr "Invia"
+
+#: src/shell/qml/HelpPage.qml:33
+msgid ""
+"Choose or drop files, or type some text, on the Send page, then pick a "
+"device. On the phone, open Quick Share."
+msgstr ""
+"Nella pagina Invia scegli o trascina dei file, oppure scrivi del testo, poi "
+"seleziona un dispositivo. Sul telefono apri Quick Share."
+
+#: src/shell/qml/HelpPage.qml:37
+msgid "Be found"
+msgstr "Farsi trovare"
+
+#: src/shell/qml/HelpPage.qml:38
+msgid ""
+"Keep “Visible to nearby devices” on in Preferences. The phone must be set to "
+"Everyone to be found, and Android sets it back after 10 minutes."
+msgstr ""
+"Tieni attiva l'opzione “Visibile ai dispositivi vicini” nelle Preferenze. "
+"Per essere trovato, il telefono deve essere impostato su “Everyone” (Tutti) "
+"e Android lo reimposta dopo 10 minuti."
+
+#: src/shell/qml/HelpPage.qml:42
+msgid "Receive"
+msgstr "Ricevere"
+
+#: src/shell/qml/HelpPage.qml:43
+msgid ""
+"An incoming transfer asks for your approval in a notification. Received "
+"files go to the download folder chosen in Preferences."
+msgstr ""
+"Un trasferimento in arrivo chiede la tua approvazione con una notifica. I "
+"file ricevuti vanno nella cartella di download scelta nelle Preferenze."
+
+#: src/shell/qml/HelpPage.qml:48
+msgid "Paired and trusted devices"
+msgstr "Dispositivi associati e attendibili"
+
+#: src/shell/qml/HelpPage.qml:54
+msgid "Paired computers"
+msgstr "Computer associati"
+
+#: src/shell/qml/HelpPage.qml:55
+msgid ""
+"Two computers running KuickShare can pair with an 8-digit code, then send to "
+"each other without asking. The port 47891 must be reachable."
+msgstr "Due computer con KuickShare possono associarsi con un codice di 8 cifre e poi inviarsi file senza chiedere. La porta 47891 deve essere raggiungibile."
+
+#: src/shell/qml/HelpPage.qml:59 src/shell/qml/SettingsPage.qml:176
+msgid "Trusted devices"
+msgstr "Dispositivi attendibili"
+
+#: src/shell/qml/HelpPage.qml:60
+msgid ""
+"“Accept and trust” on a notification accepts a phone without asking from "
+"then on. It is recognised by name and MAC address, so only on the same "
+"network."
+msgstr ""
+"“Accetta e fidati” in una notifica accetta un telefono senza chiedere da "
+"quel momento in poi. Viene riconosciuto per nome e indirizzo MAC, quindi "
+"solo sulla stessa rete."
+
+#: src/shell/qml/HelpPage.qml:65
+msgid "Troubleshooting"
+msgstr "Risoluzione dei problemi"
+
+#: src/shell/qml/HelpPage.qml:71
+msgid "The phone does not see this computer"
+msgstr "Il telefono non vede questo computer"
+
+#: src/shell/qml/HelpPage.qml:72
+msgid ""
+"Check that “Visible to nearby devices” is on, that Do Not Disturb is off (it "
+"hides this computer) and that both are on the same network."
+msgstr ""
+"Controlla che “Visibile ai dispositivi vicini” sia attivo, che Non "
+"disturbare sia disattivato (nasconde questo computer) e che entrambi siano "
+"sulla stessa rete."
+
+#: src/shell/qml/HelpPage.qml:76
+msgid "This computer does not see the phone"
+msgstr "Questo computer non vede il telefono"
+
+#: src/shell/qml/HelpPage.qml:77
+msgid "Set the phone to Everyone and keep its Quick Share screen open."
+msgstr ""
+"Imposta il telefono su “Everyone” (Tutti) e tieni aperta la schermata di "
+"Quick Share."
+
+#: src/shell/qml/HelpPage.qml:81
+msgid "Firewall"
+msgstr "Firewall"
+
+#: src/shell/qml/HelpPage.qml:82
+msgid ""
+"Discovery uses mDNS. The transfer port is random unless you fix one in "
+"Preferences: open that port in the firewall."
+msgstr ""
+"Il rilevamento usa mDNS. La porta di trasferimento è casuale, a meno che non "
+"ne fissi una nelle Preferenze: apri quella porta nel firewall."
+
+#: src/shell/qml/Main.qml:20
+msgid "KuickShare"
+msgstr "KuickShare"
+
+#: src/shell/qml/Main.qml:80
+msgid "Quit KuickShare?"
+msgstr "Uscire da KuickShare?"
+
+#: src/shell/qml/Main.qml:81
+msgid "A transfer is in progress. Quitting stops it."
+msgstr "Un trasferimento è in corso. Uscendo verrà interrotto."
+
+#: src/shell/qml/Main.qml:191 src/shell/qml/ShortcutsDialog.qml:13
+#: src/shell/qml/TransfersPage.qml:11
+msgid "Transfers"
+msgstr "Trasferimenti"
+
+#: src/shell/qml/Main.qml:209
+msgid "More"
+msgstr "Altro"
+
+#: src/shell/qml/Main.qml:235 src/shell/qml/ShortcutsDialog.qml:37
+msgid "Shortcuts"
+msgstr "Scorciatoie"
+
+#: src/shell/qml/Main.qml:374
+msgid ""
+"The sharing service is not running. Nothing can be sent or received until it "
+"is started."
+msgstr ""
+"Il servizio di condivisione non è in esecuzione. Non è possibile inviare né "
+"ricevere nulla finché non viene avviato."
+
+#: src/shell/qml/Main.qml:377
+msgid "Start service"
+msgstr "Avvia servizio"
+
+#: src/shell/qml/PairDialog.qml:19
+msgid "Pair a device"
+msgstr "Associa un dispositivo"
+
+#: src/shell/qml/PairDialog.qml:54
+msgid "The codes match"
+msgstr "I codici corrispondono"
+
+#: src/shell/qml/PairDialog.qml:63
+msgid "They differ"
+msgstr "Sono diversi"
+
+#: src/shell/qml/PairDialog.qml:82
+msgid ""
+"Open Preferences → Pair a device on the other computer as well, then choose "
+"it here."
+msgstr ""
+"Apri Preferenze → Associa un dispositivo anche sull'altro computer, poi "
+"sceglilo qui."
+
+#: src/shell/qml/PairDialog.qml:109
+msgid "Already paired"
+msgstr "Già associati"
+
+#: src/shell/qml/PairDialog.qml:131
+msgid "Looking for computers running KuickShare…"
+msgstr "Ricerca di computer con KuickShare…"
+
+#: src/shell/qml/PairDialog.qml:146
+msgid "Waiting for %1…"
+msgstr "In attesa di %1…"
+
+#: src/shell/qml/PairDialog.qml:146
+msgid "Waiting…"
+msgstr "In attesa…"
+
+#: src/shell/qml/PairDialog.qml:161
+msgid "Check that %1 shows exactly this code:"
+msgstr "Controlla che %1 mostri esattamente questo codice:"
+
+#: src/shell/qml/PairDialog.qml:180
+msgid "Paired with %1"
+msgstr "Associato a %1"
+
+#: src/shell/qml/PairDialog.qml:181
+msgid "Transfers between these computers are accepted without asking."
+msgstr ""
+"I trasferimenti tra questi computer vengono accettati senza chiedere "
+"conferma."
+
+#: src/shell/qml/PairDialog.qml:187
+msgid "Pairing did not complete"
+msgstr "Associazione non completata"
+
+#: src/shell/qml/SendPage.qml:141 src/shell/qml/SettingsPage.qml:153
+#: src/shell/qml/SettingsPage.qml:201
+msgid "Remove"
+msgstr "Rimuovi"
+
+#: src/shell/qml/SendPage.qml:190 src/shell/qml/ShortcutsDialog.qml:18
+msgid "Choose files to send"
+msgstr "Scegli i file da inviare"
+
+#: src/shell/qml/SendPage.qml:225
+msgid "Starting…"
+msgstr "Avvio in corso…"
+
+#: src/shell/qml/SendPage.qml:225
+msgid "Hidden"
+msgstr "Nascosto"
+
+#: src/shell/qml/SendPage.qml:225
+msgid "Do Not Disturb"
+msgstr "Non disturbare"
+
+#: src/shell/qml/SendPage.qml:225
+msgid "Ready"
+msgstr "Pronto"
+
+#: src/shell/qml/SendPage.qml:230
+msgid "Turn on visibility in Preferences to receive files"
+msgstr "Attiva la visibilità nelle Preferenze per ricevere file"
+
+#: src/shell/qml/SendPage.qml:230
+msgid "Hidden until Do Not Disturb ends"
+msgstr "Nascosto fino al termine di Non disturbare"
+
+#: src/shell/qml/SendPage.qml:230
+msgid "Visible as \"%1\""
+msgstr "Visibile come \"%1\""
+
+#: src/shell/qml/SendPage.qml:266
+msgid "Drop to share"
+msgstr "Rilascia per condividere"
+
+#: src/shell/qml/SendPage.qml:266
+msgid "Drop files here"
+msgstr "Trascina i file qui"
+
+#: src/shell/qml/SendPage.qml:271
+msgid "or click to choose them"
+msgstr "oppure fai clic per sceglierli"
+
+#: src/shell/qml/SendPage.qml:279
+msgid "Paste from clipboard"
+msgstr "Incolla dagli appunti"
+
+#: src/shell/qml/SendPage.qml:295 src/shell/qml/TransfersPage.qml:284
+#: src/shell/transferwatcher.cpp:83
+msgid "%1 file"
+msgid_plural "%1 files"
+msgstr[0] "%1 file"
+msgstr[1] "%1 file"
+
+#: src/shell/qml/SendPage.qml:304
+msgid "Add"
+msgstr "Aggiungi"
+
+#: src/shell/qml/SendPage.qml:309 src/shell/qml/SendPage.qml:366
+msgid "Clear"
+msgstr "Svuota"
+
+#: src/shell/qml/SendPage.qml:328
+msgid "Show all %1 files"
+msgstr "Mostra tutti i %1 file"
+
+#: src/shell/qml/SendPage.qml:353
+msgid "Text or link"
+msgstr "Testo o collegamento"
+
+#: src/shell/qml/SendPage.qml:372
+msgid "Paste"
+msgstr "Incolla"
+
+#: src/shell/qml/SendPage.qml:400
+msgid "Type or paste something to send…"
+msgstr "Scrivi o incolla qualcosa da inviare…"
+
+#: src/shell/qml/SendPage.qml:435
+msgid "A string can only be sent as a link when it is the only content"
+msgstr ""
+"Una stringa può essere inviata come collegamento solo se è l'unico contenuto"
+
+#: src/shell/qml/SendPage.qml:435
+msgid "No valid link"
+msgstr "Nessun collegamento valido"
+
+#: src/shell/qml/SendPage.qml:441
+msgid "Send as text"
+msgstr "Invia come testo"
+
+#: src/shell/qml/SendPage.qml:475
+msgid "Send to"
+msgstr "Invia a"
+
+#: src/shell/qml/SendPage.qml:495
+msgid "Looking for nearby devices…"
+msgstr "Ricerca di dispositivi vicini…"
+
+#: src/shell/qml/SendPage.qml:510
+msgid "Choose or drop something to send, then pick a device."
+msgstr "Scegli o trascina qualcosa da inviare, poi seleziona un dispositivo."
+
+#: src/shell/qml/SendPage.qml:571
+msgid "Paired"
+msgstr "Associato"
+
+#: src/shell/qml/SettingsPage.qml:28
+msgid "Choose the download folder"
+msgstr "Scegli la cartella di download"
+
+#: src/shell/qml/SettingsPage.qml:49
+msgid "Visibility"
+msgstr "Visibilità"
+
+#: src/shell/qml/SettingsPage.qml:56
+msgid "Device name"
+msgstr "Nome del dispositivo"
+
+#: src/shell/qml/SettingsPage.qml:64
+msgid "Others can find this computer and send to it"
+msgstr "Gli altri possono trovare questo computer e inviargli file"
+
+#: src/shell/qml/SettingsPage.qml:71
+msgid "Hide during Do Not Disturb"
+msgstr "Nascondi durante Non disturbare"
+
+#: src/shell/qml/SettingsPage.qml:72
+msgid "Not visible while Do Not Disturb is on"
+msgstr "Non visibile mentre Non disturbare è attivo"
+
+#: src/shell/qml/SettingsPage.qml:80
+msgid "Receiving"
+msgstr "Ricezione"
+
+#: src/shell/qml/SettingsPage.qml:86
+msgid "Download folder"
+msgstr "Cartella di download"
+
+#: src/shell/qml/SettingsPage.qml:87
+msgid "Default (Downloads)"
+msgstr "Predefinita (Download)"
+
+#: src/shell/qml/SettingsPage.qml:94
+msgid "Use the default folder"
+msgstr "Usa la cartella predefinita"
+
+#: src/shell/qml/SettingsPage.qml:100
+msgid "Random port"
+msgstr "Porta casuale"
+
+#: src/shell/qml/SettingsPage.qml:101
+msgid "A different port at every start"
+msgstr "Una porta diversa a ogni avvio"
+
+#: src/shell/qml/SettingsPage.qml:115
+msgid "Fixed port"
+msgstr "Porta fissa"
+
+#: src/shell/qml/SettingsPage.qml:132
+msgid ""
+"A fixed port (1024–65535) can be opened in the firewall. Changing the name "
+"or the port restarts sharing."
+msgstr ""
+"Una porta fissa (1024–65535) può essere aperta nel firewall. Cambiando il "
+"nome o la porta la condivisione viene riavviata."
+
+#: src/shell/qml/SettingsPage.qml:136
+msgid "Paired devices"
+msgstr "Dispositivi associati"
+
+#: src/shell/qml/SettingsPage.qml:149
+msgid "Fingerprint %1"
+msgstr "Impronta %1"
+
+#: src/shell/qml/SettingsPage.qml:160
+msgid "No paired computers yet"
+msgstr "Nessun computer associato"
+
+#: src/shell/qml/SettingsPage.qml:161
+msgid "Paired computers can send to each other without asking"
+msgstr "I computer associati possono inviarsi file senza chiedere conferma"
+
+#: src/shell/qml/SettingsPage.qml:165
+msgid "Pair a device…"
+msgstr "Associa un dispositivo…"
+
+#: src/shell/qml/SettingsPage.qml:172
+msgid "A paired computer can send you files without asking."
+msgstr "Un computer associato può inviarti file senza chiedere conferma."
+
+#: src/shell/qml/SettingsPage.qml:182
+msgid "Trust devices"
+msgstr "Considera attendibili i dispositivi"
+
+#: src/shell/qml/SettingsPage.qml:183
+msgid "Accept transfers from trusted devices without asking"
+msgstr ""
+"Accetta i trasferimenti dai dispositivi attendibili senza chiedere conferma"
+
+#: src/shell/qml/SettingsPage.qml:197
+msgid "MAC address %1"
+msgstr "Indirizzo MAC %1"
+
+#: src/shell/qml/SettingsPage.qml:208
+msgid "No devices yet"
+msgstr "Nessun dispositivo"
+
+#: src/shell/qml/SettingsPage.qml:209
+msgid "Use “Accept and trust” on an incoming transfer notification to add one"
+msgstr ""
+"Usa “Accetta e fidati” nella notifica di un trasferimento in arrivo per "
+"aggiungerne uno"
+
+#: src/shell/qml/SettingsPage.qml:216
+msgid ""
+"Matched by name and MAC address. Another device that copies both would be "
+"accepted too. Use only if you trust all devices in your LAN."
+msgstr ""
+"Il riconoscimento avviene per nome e indirizzo MAC. Anche un altro "
+"dispositivo che copia entrambi verrebbe accettato. Usalo solo se ti fidi di "
+"tutti i dispositivi della tua LAN."
+
+#: src/shell/qml/SettingsPage.qml:222
+msgid "History"
+msgstr "Cronologia"
+
+#: src/shell/qml/SettingsPage.qml:228
+msgid "Save transfer history"
+msgstr "Salva la cronologia dei trasferimenti"
+
+#: src/shell/qml/SettingsPage.qml:229
+msgid "Keep a list of sent and received transfers"
+msgstr "Mantiene un elenco dei trasferimenti inviati e ricevuti"
+
+#: src/shell/qml/SettingsPage.qml:252
+msgid "Delete entries after"
+msgstr "Elimina le voci dopo"
+
+#: src/shell/qml/SettingsPage.qml:261
+msgid "Never"
+msgstr "Mai"
+
+#: src/shell/qml/SettingsPage.qml:261
+msgid "1 day"
+msgstr "1 giorno"
+
+#: src/shell/qml/SettingsPage.qml:261
+msgid "7 days"
+msgstr "7 giorni"
+
+#: src/shell/qml/SettingsPage.qml:261
+msgid "30 days"
+msgstr "30 giorni"
+
+#: src/shell/qml/SettingsPage.qml:261
+msgid "90 days"
+msgstr "90 giorni"
+
+#: src/shell/qml/SettingsPage.qml:270
+msgid ""
+"With the history turned off nothing is saved. Entries already saved stay "
+"until they expire or you clear them."
+msgstr ""
+"Con la cronologia disattivata non viene salvato nulla. Le voci già salvate "
+"restano finché non scadono o le elimini."
+
+#: src/shell/qml/SettingsPage.qml:274
+msgid "Startup"
+msgstr "Avvio"
+
+#: src/shell/qml/SettingsPage.qml:280
+msgid "Start at login"
+msgstr "Avvia all'accesso"
+
+#: src/shell/qml/SettingsPage.qml:281
+msgid "Starts hidden, in the system tray if it is shown"
+msgstr "Si avvia nascosto, nell'area di notifica se è visibile"
+
+#: src/shell/qml/SettingsPage.qml:287
+msgid "Integration"
+msgstr "Integrazione"
+
+#: src/shell/qml/SettingsPage.qml:293
+msgid "Show tray icon"
+msgstr "Mostra l'icona nell'area di notifica"
+
+#: src/shell/qml/SettingsPage.qml:294
+msgid "Keep KuickShare in the system tray"
+msgstr "Mantiene KuickShare nell'area di notifica"
+
+#: src/shell/qml/SettingsPage.qml:301
+msgid "Dolphin context menu"
+msgstr "Menu contestuale di Dolphin"
+
+#: src/shell/qml/SettingsPage.qml:302
+msgid "Add “Send with KuickShare” to the menu of files"
+msgstr "Aggiunge “Invia con KuickShare” al menu dei file"
+
+#: src/shell/qml/SettingsPage.qml:311
+msgid ""
+"Without the tray icon, closing the window quits KuickShare, and nothing can "
+"be received until you open it again. At login it starts hidden: open "
+"KuickShare again to show the window."
+msgstr ""
+"Senza l'icona nell'area di notifica, chiudere la finestra termina KuickShare "
+"e non è possibile ricevere nulla finché non lo riapri. All'accesso si avvia "
+"nascosto: riapri KuickShare per mostrare la finestra."
+
+#: src/shell/qml/SettingsPage.qml:317
+msgid "Reset preferences?"
+msgstr "Reimpostare le preferenze?"
+
+#: src/shell/qml/SettingsPage.qml:318
+msgid ""
+"Every setting goes back to its default. The history and the paired and "
+"trusted devices are kept."
+msgstr ""
+"Tutte le impostazioni tornano ai valori predefiniti. La cronologia e i "
+"dispositivi associati e attendibili vengono mantenuti."
+
+#: src/shell/qml/SettingsPage.qml:324
+msgid "Reset"
+msgstr "Reimposta"
+
+#: src/shell/qml/SettingsPage.qml:330
+msgid "Reset preferences…"
+msgstr "Reimposta preferenze…"
+
+#: src/shell/qml/SettingsPage.qml:331
+msgid "Go back to the default preferences"
+msgstr "Torna alle preferenze predefinite"
+
+#: src/shell/qml/ShortcutsDialog.qml:17
+msgid "Show the shortcuts"
+msgstr "Mostra le scorciatoie"
+
+#: src/shell/qml/ShortcutsDialog.qml:19
+msgid "Paste files, an image or text from the clipboard"
+msgstr "Incolla file, un’immagine o del testo dagli appunti"
+
+#: src/shell/qml/ShortcutsDialog.qml:20
+msgid "Clear files and text"
+msgstr "Svuota file e testo"
+
+#: src/shell/qml/ShortcutsDialog.qml:21
+msgid "Close the window"
+msgstr "Chiudi la finestra"
+
+#: src/shell/qml/ShortcutsDialog.qml:22
+msgid "Quit KuickShare"
+msgstr "Esci da KuickShare"
+
+#: src/shell/qml/TransfersPage.qml:21
+msgid "Clear history?"
+msgstr "Svuotare la cronologia?"
+
+#: src/shell/qml/TransfersPage.qml:22
+msgid "Files you received are not touched."
+msgstr "I file ricevuti non vengono toccati."
+
+#: src/shell/qml/TransfersPage.qml:76
+msgid "Copied to clipboard"
+msgstr "Copiato negli appunti"
+
+#: src/shell/qml/TransfersPage.qml:114
+msgid "Transfer details"
+msgstr "Dettagli del trasferimento"
+
+#: src/shell/qml/TransfersPage.qml:137
+msgid "Result"
+msgstr "Risultato"
+
+#: src/shell/qml/TransfersPage.qml:137
+msgid "Size"
+msgstr "Dimensione"
+
+#: src/shell/qml/TransfersPage.qml:263
+msgid "Waiting for your approval"
+msgstr "In attesa della tua approvazione"
+
+#: src/shell/qml/TransfersPage.qml:265
+msgid "Receiving…"
+msgstr "Ricezione in corso…"
+
+#: src/shell/qml/TransfersPage.qml:267
+msgid "Sending…"
+msgstr "Invio in corso…"
+
+#: src/shell/qml/TransfersPage.qml:269
+msgid "Sent"
+msgstr "Inviato"
+
+#: src/shell/qml/TransfersPage.qml:269
+msgid "Received"
+msgstr "Ricevuto"
+
+#: src/shell/qml/TransfersPage.qml:271
+msgid "Cancelled"
+msgstr "Annullato"
+
+#: src/shell/qml/TransfersPage.qml:273
+msgid "Declined"
+msgstr "Rifiutato"
+
+#: src/shell/qml/TransfersPage.qml:273
+msgid "You declined"
+msgstr "Hai rifiutato"
+
+#: src/shell/qml/TransfersPage.qml:276
+msgid "Not accepted"
+msgstr "Non accettato"
+
+#: src/shell/qml/TransfersPage.qml:276
+msgid "Interrupted"
+msgstr "Interrotto"
+
+#: src/shell/qml/TransfersPage.qml:278
+msgid "Connecting…"
+msgstr "Connessione in corso…"
+
+#: src/shell/qml/TransfersPage.qml:341
+msgid "The history is large (%1) and may slow KuickShare down."
+msgstr "La cronologia è grande (%1) e potrebbe rallentare KuickShare."
+
+#: src/shell/qml/TransfersPage.qml:344 src/shell/qml/TransfersPage.qml:367
+msgid "Clear history"
+msgstr "Svuota cronologia"
+
+#: src/shell/qml/TransfersPage.qml:355
+msgid ""
+"History is turned off: new transfers are not saved. You can turn it on in "
+"Preferences."
+msgstr ""
+"La cronologia è disattivata: i nuovi trasferimenti non vengono salvati. Puoi "
+"attivarla nelle Preferenze."
+
+#: src/shell/qml/TransfersPage.qml:379
+msgid "No transfers yet"
+msgstr "Nessun trasferimento"
+
+#: src/shell/qml/TransfersPage.qml:379
+msgid "Starting the sharing service…"
+msgstr "Avvio del servizio di condivisione…"
+
+#: src/shell/qml/TransfersPage.qml:380
+msgid ""
+"Sent and received transfers are listed here. Make sure this computer is "
+"visible in Preferences to receive."
+msgstr ""
+"I trasferimenti inviati e ricevuti sono elencati qui. Per ricevere, "
+"assicurati che questo computer sia visibile nelle Preferenze."
+
+#: src/shell/qml/TransfersPage.qml:380
+msgid ""
+"Transfers are only listed while the app is open, because the history is "
+"turned off."
+msgstr ""
+"I trasferimenti sono elencati solo mentre l'applicazione è aperta, perché la "
+"cronologia è disattivata."
+
+#: src/shell/qml/TransfersPage.qml:473
+msgid "Unknown device"
+msgstr "Dispositivo sconosciuto"
+
+#: src/shell/qml/TransfersPage.qml:497
+msgid "Trusted"
+msgstr "Attendibile"
+
+#: src/shell/qml/TransfersPage.qml:506
+msgid "%1%"
+msgstr "%1%"
+
+#: src/shell/qml/TransfersPage.qml:513
+msgid "Cancel"
+msgstr "Annulla"
+
+#: src/shell/qml/TransfersPage.qml:520
+msgid "Remove from list"
+msgstr "Rimuovi dall'elenco"
+
+#: src/shell/qml/TransfersPage.qml:531
+msgid "Wants to share with you · PIN %1"
+msgstr "Vuole condividere con te · PIN %1"
+
+#: src/shell/qml/TransfersPage.qml:540
+msgid "More details"
+msgstr "Altri dettagli"
+
+#: src/shell/qml/TransfersPage.qml:579 src/shell/transferwatcher.cpp:145
+msgid "Accept"
+msgstr "Accetta"
+
+#: src/shell/qml/TransfersPage.qml:585 src/shell/transferwatcher.cpp:157
+msgid "Decline"
+msgstr "Rifiuta"
+
+#: src/shell/qml/TransfersPage.qml:591 src/shell/transferwatcher.cpp:190
+msgid "Open folder"
+msgstr "Apri cartella"
+
+#: src/shell/qml/TransfersPage.qml:598 src/shell/transferwatcher.cpp:174
+msgid "Copy"
+msgstr "Copia"
+
+#: src/shell/transferjob.cpp:16
+msgid "Sending files"
+msgstr "Invio dei file"
+
+#: src/shell/transferjob.cpp:16
+msgid "Receiving files"
+msgstr "Ricezione dei file"
+
+#: src/shell/transferjob.cpp:17
+msgid "To"
+msgstr "A"
+
+#: src/shell/transferjob.cpp:17
+msgid "From"
+msgstr "Da"
+
+#: src/shell/transferjob.cpp:18
+msgid "Files"
+msgstr "File"
+
+#: src/shell/transferjob.cpp:49
+msgid "The transfer was interrupted"
+msgstr "Il trasferimento è stato interrotto"
+
+#: src/shell/transferwatcher.cpp:120
+msgid "a nearby device"
+msgstr "un dispositivo vicino"
+
+#: src/shell/transferwatcher.cpp:129
+msgid "Transfer not accepted"
+msgstr "Trasferimento non accettato"
+
+#: src/shell/transferwatcher.cpp:129
+msgid "%1 declined the transfer or could not receive it"
+msgstr "%1 ha rifiutato il trasferimento o non è riuscito a riceverlo"
+
+#: src/shell/transferwatcher.cpp:133
+msgid "Transfer interrupted"
+msgstr "Trasferimento interrotto"
+
+#: src/shell/transferwatcher.cpp:133
+msgid "The connection with %1 was lost"
+msgstr "La connessione con %1 è stata persa"
+
+#: src/shell/transferwatcher.cpp:141
+msgid "Incoming transfer"
+msgstr "Trasferimento in arrivo"
+
+#: src/shell/transferwatcher.cpp:142
+msgid "A nearby device"
+msgstr "Un dispositivo vicino"
+
+#: src/shell/transferwatcher.cpp:143
+msgid "%1 wants to share with you"
+msgstr "%1 vuole condividere con te"
+
+#: src/shell/transferwatcher.cpp:143
+msgid ""
+"%1 wants to share with you\n"
+"PIN: %2"
+msgstr ""
+"%1 vuole condividere con te\n"
+"PIN: %2"
+
+#: src/shell/transferwatcher.cpp:151
+msgid "Accept and trust"
+msgstr "Accetta e fidati"
+
+#: src/shell/transferwatcher.cpp:172
+msgid "Text received"
+msgstr "Testo ricevuto"
+
+#: src/shell/transferwatcher.cpp:173
+msgid ""
+"From %1:\n"
+"%2"
+msgstr ""
+"Da %1:\n"
+"%2"
+
+#: src/shell/transferwatcher.cpp:180
+msgid "Open link"
+msgstr "Apri collegamento"
+
+#: src/shell/transferwatcher.cpp:188
+msgid "Files received"
+msgstr "File ricevuti"
+
+#: src/shell/transferwatcher.cpp:189
+msgid "From %1"
+msgstr "Da %1"

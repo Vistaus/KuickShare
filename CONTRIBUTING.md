@@ -1,0 +1,106 @@
+# Contributing
+
+KuickShare targets Fedora with KDE Plasma 6 only. Issues and pull requests are welcome; for anything larger than a small fix, open an issue first to agree on the approach.
+
+## Repository layout
+
+| Path | Content |
+|---|---|
+| `Cargo.toml`, `Cargo.lock` | Rust project (root) |
+| `src/core/` | Daemon `kuickshared`: Quick Share protocol ([`rqs_lib`](https://github.com/nozwock/rquickshare), pinned rev), settings, D-Bus API. Its unit tests sit next to the code |
+| `src/shell/` | C++ and QML app `kuickshare` (Qt 6, KF6, Kirigami), with its CMake project |
+| `tests/core/` | Rust integration tests; they start the daemon on a private D-Bus |
+| `tests/shell/` | Qt tests: transfer model, Dolphin menu entry, `Exec` quoting |
+| `data/` | Files installed on the host: `.desktop`, metainfo, icons, notification definitions, Dolphin service menu |
+| `build/` | Build container (`build-env.sh`, `Containerfile`) and AppImage installer (`build-appimage.sh`, `appimage/`, `test-install.sh`) |
+| `po/` | Translation catalogs |
+| `docs/` | User and design documentation |
+| `dist/` | Generated, not in git: the AppImage and `tmp/` (CMake builds, AppImage staging) |
+
+## Build
+
+Dependencies live in a podman image defined by [`build/Containerfile`](build/Containerfile), so nothing is installed on the host. `build/build-env.sh` runs a command inside it (building the image on first use). Rust comes from the host's rustup (stable, edition 2024).
+
+```sh
+build/build-env.sh cargo build
+build/build-env.sh sh -c 'cmake -S src/shell -B dist/tmp/cmake-dev -G Ninja && cmake --build dist/tmp/cmake-dev'
+build/build-appimage.sh    # dist/KuickShare-<version>-x86_64.AppImage
+```
+
+## Run from the build tree
+
+```sh
+dist/tmp/cmake-dev/kuickshare [files...]
+```
+
+`--background` starts hidden in the tray and `--page send|transfers|settings|help` opens a page (see `--help`). The binary starts the daemon it finds next to it (`dist/tmp/cmake-dev/kuickshared` links to `target/debug/kuickshared`).
+
+The app also needs a few files from `data/` on the host:
+
+| File | Destination |
+|---|---|
+| `kuickshare.notifyrc` | `~/.local/share/knotifications6/` |
+| icons | `~/.local/share/icons/hicolor/` |
+| `io.github.the_beper.KuickShare.desktop` | `~/.local/share/applications/`, with `Exec` pointing at the built binary |
+| `kuickshare-send.desktop` (executable) | `~/.local/share/kio/servicemenus/`, with `Exec` pointing at the built binary |
+
+## Checks
+
+CI runs these on every push and pull request, in a `fedora:44` container ([`ci.yml`](.github/workflows/ci.yml)). Run them before opening a pull request.
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features                              # unit tests and tests/core; needs dbus-daemon
+cmake -S src/shell -B dist/tmp/cmake-dev -G Ninja && cmake --build dist/tmp/cmake-dev
+ctest --test-dir dist/tmp/cmake-dev
+qmllint-qt6 -I /usr/lib64/qt6/qml src/shell/qml/*.qml
+```
+
+Outside the build container, prefix the commands with `build/build-env.sh`; `dbus-daemon` is in the image.
+
+## Code style
+
+- Rust: `rustfmt` defaults, Clippy clean, `Result` with context instead of `unwrap()` outside tests.
+- C++ and QML: match the surrounding code.
+- Comments, docs and commit messages in English.
+- Keep changes small and focused. Add a test for non-trivial logic.
+- Update the docs in the same change as the code.
+
+## Screenshots
+
+The images in `docs/screenshots/` come from the real shell running against a fake core, so they show made-up devices and never the data of the machine that takes them. [`build/screenshots/`](build/screenshots/) has the scripts:
+
+| Script | Purpose |
+|---|---|
+| `all.sh` | Retakes every screenshot that can be scripted |
+| `shoot.sh <name> [options]` | Captures one window as `docs/screenshots/<name>.png` (`OUT` changes the folder, `WAIT` the seconds before the capture) |
+| `demo.sh [options]` | Opens the shell on its own private D-Bus bus, with settings in a temporary folder |
+| `fake_core.py` | The made-up devices, transfers and history; edit it to change what the screenshots show |
+
+They run on the host, not in the container: they need `spectacle`, `dbus-daemon`, `gdbus` and Python with PyGObject, and the shell built in `dist/tmp/cmake-dev` (see [Build](#build)). The windows are captured as the app opens them, at its fixed size, using the colours and icon theme of the desktop: switch to the light theme and close other windows first. `pair.png` needs a click and is taken by hand (Preferences, Pair a device).
+
+## Translations
+
+Texts in the shell are marked with `i18n()`. After adding or changing any, regenerate the catalogs:
+
+```sh
+build/build-env.sh po/extract.sh
+```
+
+This rebuilds `po/kuickshare.pot` from the files in `po/POTFILES.in` and merges it into `po/<language>.po` for each code in `po/LINGUAS`. A new language is a new `po/<language>.po` plus its code in `po/LINGUAS`.
+
+## Releases
+
+1. Set the new version in `Cargo.toml`, `src/shell/CMakeLists.txt` and the `<releases>` block of `data/io.github.the_beper.KuickShare.metainfo.xml`, and describe it in `CHANGELOG.md`.
+2. Tag it `vX.Y.Z`, matching the version, and push the tag.
+
+The tag triggers [`release.yml`](.github/workflows/release.yml): it builds the AppImage, checks that its version matches the tag, and publishes it with a `SHA256SUMS` file.
+
+## Proposing changes
+
+1. Fork, create a branch, make the change.
+2. Make sure all checks pass.
+3. Open a pull request describing what and why.
+
+By contributing you agree that your work is licensed under [GPL-3.0-or-later](LICENSE).

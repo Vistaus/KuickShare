@@ -1,0 +1,84 @@
+cmake_minimum_required(VERSION 3.24)
+project(kuickshare VERSION 1.0.0 LANGUAGES CXX)
+add_compile_definitions(KUICKSHARE_VERSION="${PROJECT_VERSION}")
+
+find_package(ECM REQUIRED NO_MODULE)
+set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
+
+include(KDEInstallDirs)
+include(KDECMakeSettings)
+include(KDECompilerSettings NO_POLICY_SCOPE)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 DBus Widgets Test)
+find_package(KF6 REQUIRED COMPONENTS Kirigami I18n CoreAddons DBusAddons StatusNotifierItem Notifications JobWidgets)
+
+qt_add_executable(kuickshare
+    main.cpp
+    corebridge.cpp
+    transfermodel.cpp
+    devicemodel.cpp
+    autostart.cpp
+    dolphinmenu.cpp
+    transferjob.cpp
+    transferwatcher.cpp
+    dndwatcher.cpp
+)
+
+# The Dolphin entry the installer also uses, so the app can add it back when asked.
+qt_add_resources(kuickshare servicemenu
+    PREFIX /data
+    BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../data
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/../../data/kuickshare-send.desktop)
+
+qt_add_qml_module(kuickshare
+    URI io.github.the_beper.KuickShare
+    RESOURCE_PREFIX /qt/qml
+    QML_FILES
+        qml/Main.qml
+        qml/TransfersPage.qml
+        qml/SendPage.qml
+        qml/SettingsPage.qml
+        qml/HelpPage.qml
+        qml/AboutDialog.qml
+        qml/ShortcutsDialog.qml
+        qml/SectionTitle.qml
+        qml/PairDialog.qml
+)
+
+target_link_libraries(kuickshare PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus Qt6::Widgets
+    KF6::Kirigami KF6::I18n KF6::I18nQml KF6::CoreAddons KF6::DBusAddons KF6::StatusNotifierItem KF6::Notifications KF6::JobWidgets
+)
+
+install(TARGETS kuickshare ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../../data/kuickshare.notifyrc DESTINATION ${KDE_INSTALL_KNOTIFYRCDIR})
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../../data/io.github.the_beper.KuickShare.desktop DESTINATION ${KDE_INSTALL_APPDIR})
+# Dolphin ignores service menus that are not executable.
+install(PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/../../data/kuickshare-send.desktop DESTINATION ${KDE_INSTALL_DATADIR}/kio/servicemenus)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../../data/icons/hicolor/scalable/apps/io.github.the_beper.KuickShare.svg DESTINATION ${KDE_INSTALL_ICONDIR}/hicolor/scalable/apps)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../../data/icons/hicolor/symbolic/apps/io.github.the_beper.KuickShare-symbolic.svg DESTINATION ${KDE_INSTALL_ICONDIR}/hicolor/symbolic/apps)
+
+file(CREATE_LINK ${CMAKE_CURRENT_SOURCE_DIR}/../../target/debug/kuickshared ${CMAKE_BINARY_DIR}/kuickshared SYMBOLIC)
+
+enable_testing()
+qt_add_executable(transfermodel_test ../../tests/shell/transfermodel_test.cpp transfermodel.cpp)
+target_include_directories(transfermodel_test PRIVATE .)
+target_link_libraries(transfermodel_test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME transfermodel COMMAND transfermodel_test)
+
+qt_add_executable(dolphinmenu_test ../../tests/shell/dolphinmenu_test.cpp dolphinmenu.cpp)
+qt_add_resources(dolphinmenu_test servicemenu
+    PREFIX /data
+    BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../data
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/../../data/kuickshare-send.desktop)
+target_include_directories(dolphinmenu_test PRIVATE .)
+target_link_libraries(dolphinmenu_test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME dolphinmenu COMMAND dolphinmenu_test)
+
+qt_add_executable(execquote_test ../../tests/shell/execquote_test.cpp)
+target_include_directories(execquote_test PRIVATE .)
+target_link_libraries(execquote_test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME execquote COMMAND execquote_test)

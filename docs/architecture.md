@@ -1,0 +1,315 @@
+# Architecture
+
+How KuickShare is put together and what it does and does not protect against. For the D-Bus members see [dbus-api.md](dbus-api.md); for day-to-day use see [usage.md](usage.md); for reporting a vulnerability see [SECURITY.md](../SECURITY.md).
+
+- [Process model](#process-model)
+- [Transfer data flow](#transfer-data-flow)
+- [Transfer lifecycle](#transfer-lifecycle)
+- [Files on disk](#files-on-disk)
+- [Trust model](#trust-model)
+- [Threat model](#threat-model)
+- [Display of remote names](#display-of-remote-names)
+- [Testing](#testing)
+- [Packaging](#packaging)
+
+## Process model
+
+Two processes talk over the session D-Bus (`io.github.the_beper.KuickShare`, interface `...KuickShare1`).
+
+| Process | Source | Language | Job |
+| --- | --- | --- | --- |
+| `kuickshared` (core) | `src/core/` | Rust, tokio, zbus | Quick Share protocol through `rqs_lib` (git rev pinned in `Cargo.toml`), discovery, trust channel, settings, history |
+| `kuickshare` (shell) | `src/shell/` | C++20, Qt 6, KF 6, Kirigami | Window, tray, notifications, progress jobs, Dolphin entry, Do Not Disturb |
+
+The split keeps the protocol code in Rust, where the library lives, and the desktop integration in Qt/KF6, where the bindings are mature. It also lets the core run and be tested without any UI (see [Testing](#testing)). The shell holds no protocol state: after a reconnect it reloads everything from the core.
+
+```mermaid
+flowchart LR
+    subgraph shell["kuickshare (shell)"]
+        QML["QML UI + tray"]
+        CB["CoreBridge"]
+        TW["TransferWatcher"]
+        DW["DndWatcher"]
+        QML --- CB
+        TW --- CB
+        DW --- CB
+    end
+    subgraph core["kuickshared (core)"]
+        SVC["D-Bus service"]
+        CORE["Core: settings, history"]
+        RQS["rqs_lib: Quick Share + mDNS"]
+        TR["Trust: Noise XX listener"]
+        SVC --- CORE
+        CORE --- RQS
+        CORE --- TR
+    end
+    CB <-->|"session D-Bus: methods, properties, signals"| SVC
+    TW -->|"KNotification, KUiServerV2"| NS["Plasma notifications"]
+    DW -->|"Inhibited property"| NS
+    DOL["Dolphin service menu"] -->|"kuickshare FILES"| shell
+    RQS <-->|"mDNS + TCP (random or static port)"| PHONE["Phone / other Quick Share device"]
+    TR <-->|"TCP 47891, Noise XX"| PEER["Other KuickShare computer"]
+```
+
+### Who starts whom
+
+- The shell starts the core. At startup `CoreBridge` checks whether the bus name is owned. If it is, the shell attaches to that core. If not, it runs `kuickshared` from its own directory with `QProcess`.
+- The shell is single-instance (`KDBusService::Unique`). A second launch, for example from Dolphin, only queues its files in the running window.
+- On exit the shell sends SIGTERM to a core it started and waits up to 3 s. A core it only attached to is left running. The core stops its engine on SIGTERM or Ctrl+C.
+- Autostart is a `.desktop` file in `~/.config/autostart` that runs `kuickshare --background`.
+
+### When the core is down
+
+`CoreBridge` watches the bus name. When the owner disappears it marks itself disconnected and clears the device list, and the window shows an error banner with a "Start service" button. Nothing is restarted automatically. The button kills a core that is running but not on the bus, then starts a new one. When the name reappears the shell reloads properties, history, paired devices and the allowed list, and drops its transfer rows. A transfer in progress when the core died is lost.
+
+### Inside the core
+
+| Module | Role |
+| --- | --- |
+| `main.rs` | Loads settings, history and trust, serves D-Bus, starts the engine, waits for a signal |
+| `app.rs` | `Core`: owns the `rqs_lib` engine and the settings. Settings that change the device name or port rebuild the engine, and the old values are restored if that fails |
+| `dbus.rs` | The D-Bus interface, plus forwarder tasks that turn library events into signals, run the consent timeout, the name guard and auto-accept |
+| `trust.rs` | Noise XX channel on TCP 47891: probe, announce, pairing |
+| `allowed.rs` | Trusted devices by name and MAC |
+| `safety.rs` | File name guard |
+| `ratelimit.rs` | Per-address connection limit for the trust port |
+| `history.rs`, `settings.rs` | JSON persistence |
+
+Settings that restart the engine (device name, static port, reset) are refused while a transfer is active. A transfer with no event for 600 s counts as over, so a lost final event cannot block them forever.
+
+## Transfer data flow
+
+Transfer ids are `ip:port` of the remote side. Event and method names below are shortened; see [dbus-api.md](dbus-api.md).
+
+```mermaid
+sequenceDiagram
+    participant P as Remote device
+    participant L as rqs_lib
+    participant C as Core (dbus.rs)
+    participant S as Shell
+    participant U as User
+
+    Note over P,U: Incoming
+    P->>L: connection request, file names, size
+    L->>C: event WaitingForUserConsent
+    C->>C: unsafe file name? then decline
+    C->>C: start 300 s consent timer
+    C->>C: intent from paired peer, or allowed name+MAC? then accept
+    C->>S: signal TransferUpdated
+    S->>U: notification: Accept / Accept and trust / Decline
+    U->>S: Accept
+    S->>C: Accept(id)
+    C->>L: ConsentAccept
+    L->>P: receive files into the download folder
+    L->>C: events ReceivingFiles ... Finished
+    C->>C: write history entry
+    C->>S: TransferUpdated (final, history_uid)
+
+    Note over P,U: Outgoing
+    U->>S: pick files and a device
+    S->>C: SendFiles(device, paths)
+    C->>C: check paths exist, look up device
+    opt device is a paired KuickShare computer
+        C->>P: announce over Noise (2 s limit)
+    end
+    C->>L: SendInfo
+    L->>P: connection request
+    P->>L: accepted or rejected
+    L->>C: events SendingFiles ... Finished
+    C->>S: TransferUpdated
+```
+
+An announce that fails only logs a message. The transfer still goes out and the receiver asks its user.
+
+## Transfer lifecycle
+
+The state names come from `rqs_lib` and are passed through unchanged as strings. The core only interprets a few.
+
+| State | Meaning for KuickShare |
+| --- | --- |
+| `WaitingForUserConsent` (inbound) | Starts the 300 s timer; the only state where auto-accept is evaluated |
+| `SendingFiles`, `ReceivingFiles` | Counts as active for the shell (progress job, Do Not Disturb, blocking settings) |
+| `Finished`, `Cancelled`, `Rejected`, `Disconnected` | Final. The transfer leaves the active set and is written to the history |
+
+- The first final state wins. `Finished` may be followed by `Disconnected`; the second is ignored in the core and in the shell's `TransferModel`.
+- Later events often carry less data than earlier ones, so the core merges events and keeps known fields.
+- The library reports a refusal by the remote side as `Disconnected`. The shell shows "not accepted" when an outgoing transfer ends that way before any data moved.
+- The core's guard may decline an inbound transfer at any non-final event that lists file names, not only at the consent request.
+
+## Files on disk
+
+Paths follow the XDG variables; defaults are shown. Writes go to `<name>.tmp` and are renamed over the target.
+
+| File | Location | Contents | If unreadable or invalid |
+| --- | --- | --- | --- |
+| `settings.json` | `~/.config/kuickshare/` | All preferences, including the allowed (trusted by name and MAC) list | Renamed to `settings.json.bak`, defaults used |
+| `identity.json` | `~/.local/share/kuickshare/` | Long-term Noise key pair, mode 0600, created on first start | The core refuses to start; the file is not touched |
+| `peers.json` | `~/.local/share/kuickshare/` | Paired computers: name, public key, SHA-256 fingerprint, pairing time | Renamed to `peers.json.bak`, no paired computers |
+| `history.json` | `~/.local/share/kuickshare/` | Finished transfers, newest first | Logged and treated as empty; no `.bak`, so the next save overwrites it |
+| Received files | Setting `download_dir`, else the library default (XDG download dir) | Written by `rqs_lib` | Not managed by KuickShare |
+| Clipboard images | `<cache>/clipboard/` | PNGs saved to send a pasted image; the shell deletes those older than 1 h at startup | |
+| Autostart entry | `~/.config/autostart/io.github.the_beper.KuickShare.desktop` | Written by the shell setting | |
+| Installation | `~/.local/share/kuickshare/bin/`, `.desktop`, icons, `.mo`, service menu | See [Packaging](#packaging) | |
+
+`--uninstall` keeps the first four rows; `--uninstall --purge` deletes them.
+
+## Trust model
+
+KuickShare takes part in ordinary Quick Share, where the sender is anonymous and every transfer needs the user's consent. On top of that it has two optional ways to skip the prompt. They are independent and can be switched off in the settings (trusted devices) or by not pairing.
+
+| | Paired computer | Trusted device |
+| --- | --- | --- |
+| Works with | Another KuickShare installation | Any Quick Share sender, e.g. a phone |
+| Identity | Noise static public key | Advertised name plus MAC address |
+| Set up by | Pairing with a code compared on both screens | "Accept and trust" on a notification |
+| Strength | Cryptographic for the announcement; the transfer itself is matched by IP | Weak: both values can be copied by a LAN attacker |
+
+### Paired computers
+
+The trust channel is a Noise XX handshake (`Noise_XX_25519_ChaChaPoly_BLAKE2s`, crate `snow`) over TCP 47891. The port is fixed so a peer can be reached knowing only its IP. The core listens on all interfaces. Both sides send their device name in the handshake payload. Frames are length-prefixed (2 bytes) and every read or write has a 10 s timeout. After the handshake the initiator sends one of three requests:
+
+| Request | Effect |
+| --- | --- |
+| Probe | Answered for anyone. Says whether the caller's key is paired. Used during discovery to label cards "KuickShare" or "trusted" |
+| Intent | Accepted only from a paired key. Stores the peer's name for its IP for 60 s, once |
+| Pair | Accepted only while the user has opened the pairing window (5 min) and the peer sent a non-empty name |
+
+Pairing:
+
+1. Both sides derive an 8-digit code (shown as `1234 5678`) from the first 4 bytes of the Noise handshake hash. A man in the middle would have to find a key pair that gives the same code on both sides; the source comment says 6 digits could be searched in under a minute and 8 digits cannot in the time the user has (estimate by the author, unverified).
+2. Each user compares the codes and confirms or cancels, within 120 s.
+3. Each side sends its answer. Only if both said yes does each store the other's public key in `peers.json`.
+
+Only one pairing may run at a time, so another host cannot take over the code on screen. Two computers count as trusted for sending only if each has the other's key; the probe checks both directions.
+
+Receiving: when an inbound transfer asks for consent, the core looks for an intent from the same source IP less than 60 s old. If there is one, it accepts. The match is by IP address, not by key, so the transfer itself is not authenticated to the Noise identity (see [SECURITY.md](../SECURITY.md)).
+
+Sending: the core announces only to computers it saw as `trusted` in a probe.
+
+### Trusted devices by name and MAC
+
+"Accept and trust" on a consent notification stores the sender's name and its MAC address in the allowed list. The MAC is read from the kernel ARP table (`/proc/net/arp`) for the transfer's source IP. This works only for IPv4 neighbours on the same link; an incomplete entry, another network or IPv6 gives no MAC, and the device is then asked about normally.
+
+A later transfer is accepted without asking if the option is on, the name is non-empty and both name and MAC match an entry. The MAC is looked up only when the option is on.
+
+> [!WARNING]
+> Name and MAC are both set by the sender. Anyone on the same network who copies them is accepted without a prompt. The file name guard still applies, but the files are written to the download folder. Use this only on networks you trust.
+
+### Consent and the guard
+
+- **Consent timeout.** An inbound transfer waiting for an answer is declined after 300 s.
+- **File name guard** (`safety.rs`). The library writes the names it is given straight into the download folder, so the core declines any inbound transfer with a name that is empty, `.` or `..`, longer than 255 bytes, or contains `/`, `\`, a control character or an invisible or direction-changing character (U+200B to U+200F, U+202A to U+202E, U+2060 to U+2064, U+2066 to U+2069, U+FEFF). It runs before consent and before auto-accept, so no rule can bypass it.
+
+### Limits on the trust port
+
+| Limit | Value |
+| --- | --- |
+| Connections per address | 30 per 60 s; refused attempts do not extend the block |
+| Open connections per address | 4 |
+| Open connections in total | 32 |
+| Idle time per read or write | 10 s |
+| Intent lifetime | 60 s, used once |
+| Pairing window | 5 min, opened by the user |
+| Pairing confirmation | 120 s |
+
+Refused connections are closed without a reply.
+
+### History caps
+
+| Cap | Value |
+| --- | --- |
+| Files kept per entry | 200 |
+| Text kept per entry | 10,000 characters |
+| Age | `history_keep_days` (0 keeps everything); applied on load, on add and on read |
+| Number of entries | No cap other than age (unverified that the library bounds what a sender can generate) |
+| Off switch | `history_enabled`; when off nothing is recorded |
+
+Wi-Fi credentials are recorded by network name only, never the password.
+
+### What the core never does
+
+- Accept a transfer with an unsafe file name, or with no consent, intent or allowed-list match.
+- Pair without the window open, with an unnamed computer, or without both users confirming.
+- Connect to a non-local address because an mDNS advert named one. Probes go only to private, link-local and loopback addresses, at most once per 20 s per address.
+- Store a Wi-Fi password, or send the private key anywhere.
+- Open links or run received files. The shell opens a link only when the user clicks.
+- Read the contents of the files being sent, apart from handing their paths to the library.
+
+What `rqs_lib` itself does on the network is not audited here (unverified).
+
+## Threat model
+
+Assumes the attacker is on the same LAN, or a malicious app runs as the same user. A passive observer of the Quick Share connection is a protocol matter and out of scope.
+
+| Threat | Mitigation | Residual risk |
+| --- | --- | --- |
+| Sender uses a path in a file name to write outside the download folder | Name guard declines the transfer | Names that are valid but misleading (long, unusual Unicode) still pass |
+| Sender hides the real extension with direction characters | Guard rejects them in file names; the shell neutralises markup in names | The shell does not strip direction characters from device names |
+| Unknown sender floods the user with requests | Each request needs consent and expires after 300 s | No limit on the number of requests (unverified for the library) |
+| Partial files, no disk space check, any size | None in KuickShare | Documented in [SECURITY.md](../SECURITY.md) |
+| Man in the middle during pairing | Noise XX plus an 8-digit code compared by both users | The user confirms without comparing |
+| Stranger starts a pairing | Pairing window must be opened by the user, expires in 5 min, one at a time, needs both confirmations | While open, anyone on the LAN can make a code appear; the user must decline |
+| Copy of name and MAC of a trusted device | MAC from the ARP table, same link only, option can be turned off | A LAN attacker can set both and is accepted silently |
+| Hijack of the intent window of a paired computer | Intent needs a paired key, lasts 60 s, used once | Matched by source IP, so a host that can take that IP and reach the Quick Share port in that time is accepted |
+| Flood of the trust port | Per-address rate limit, per-address and global caps, 10 s timeouts | Many addresses can fill the 32 slots and delay probes and pairing; transfers by consent still work |
+| mDNS advert makes the core connect to an outside host | Probe only to local addresses | Any local address can be probed (a TCP connect to 47891) |
+| Theft of the identity key | File mode 0600, written through a private temp file | Not encrypted; another process of the same user can read it |
+| Other process on the session bus calls the API (accept, trust, send) | None seen in the interface code: no check of the caller | Same trust boundary as the user's session |
+| Huge metadata bloats the history | Caps on files and text per entry | Entry count is bounded only by age |
+| Rich-text or HTML injection through a remote name or text | Shell escapes names and text in notifications, labels use plain text | See next section |
+| Leak of Wi-Fi password through the history | Only the network name is kept | None known |
+| Forged "trusted" display on a card | The trust label comes from the core's probe, not from the advert | Depends on the probe being correct |
+
+## Display of remote names
+
+Remote names are data chosen by the sender. The shell handles them in three places:
+
+- `CoreBridge::plain()` replaces `<` and `>` with the single angle quotes U+2039 and U+203A, so a name cannot be read as rich text by a label. It is applied to device names, file lists, trusted and allowed device names, and pairing peer names and messages, whether they come from live signals or from the history.
+- Notifications (`TransferWatcher`) pass device name, PIN and text preview through `toHtmlEscaped()`. The preview is shortened first.
+- The text preview and the history text in the transfers page use `Text.PlainText`.
+
+Not done: direction and zero-width characters are not removed from names shown in the UI. The core's guard covers file names only, so a device name can still contain them.
+
+The "Open link" action appears only for received text that is a single `http://` or `https://` URL without spaces.
+
+## Testing
+
+Everything below runs in CI (`.github/workflows/ci.yml`) in a `fedora:44` container, with `QT_QPA_PLATFORM=offscreen`, together with `cargo fmt --check`, Clippy with `-D warnings` and `qmllint`.
+
+| Layer | Where | Covers |
+| --- | --- | --- |
+| Rust unit tests | `#[cfg(test)]` in `src/core/*.rs` | Name guard, rate limiter, ARP parsing and the trusted-sender rule, settings round trip and defaults, history, stale transfer cleanup, event merging, local-address filter, final states, code format. `trust.rs` tests run two real nodes over loopback: pairing, declined pairing, strangers refused, unnamed computer, unpair, per-address and global connection limits |
+| Rust integration | `tests/core/dbus_api.rs` | Starts the real `kuickshared` binary and drives its D-Bus API as the shell does: default settings, persistence, reset, history remove, clear and expiry, legacy entries without an id, trusting an unknown transfer |
+| Qt tests | `tests/shell/`, run by `ctest` | `TransferModel` (merging, final-state handling, history rows), Dolphin menu entry writing, Exec quoting |
+
+The integration tests never touch the desktop's bus. Each test starts its own `dbus-daemon` on an abstract socket with a generated config (no service activation), and runs the core with `DBUS_SESSION_BUS_ADDRESS`, `HOME`, `XDG_CONFIG_HOME` and `XDG_DATA_HOME` pointing into a temp directory. `dbus-daemon` must be installed.
+
+Not covered by automated tests:
+
+- Real Quick Share transfers (with a phone or between two instances): the consent, auto-accept and name-guard paths in `forward_transfers` have no test that feeds them library events.
+- Pairing between two real computers; it is tested over loopback only.
+- `CoreBridge`, notifications, progress jobs and the QML UI, beyond `qmllint`.
+- The AppImage: `build/test-install.sh` is a manual smoke test (install, start, update while running, uninstall with `--purge`) that needs a graphical KDE session.
+
+## Packaging
+
+The AppImage is an installer, not a runtime container. Running it copies the program into `~/.local` and starts it; the file can then be deleted. Flatpak was rejected because it cannot export Dolphin service menus.
+
+```mermaid
+flowchart LR
+    A["build/build-appimage.sh"] -->|"runs in"| B["podman image, Fedora 44 (build/Containerfile)"]
+    B --> C["cargo build --release --locked"]
+    B --> D["cmake + ninja, Release"]
+    B --> E["msgfmt: po/*.po to .mo"]
+    C & D & E --> F["AppDir: 2 binaries, data files, locale, install.sh"]
+    F --> G["mksquashfs (zstd) + type2 runtime"]
+    G --> H["dist/KuickShare-VERSION-x86_64.AppImage"]
+    H -->|"AppRun"| I["install.sh: copy into ~/.local, start"]
+```
+
+- **Build environment.** `build/build-env.sh` builds `localhost/kuickshare-build:fedora44` from `build/Containerfile` and runs commands in it with the host's rustup and cargo mounted. The host needs no development packages.
+- **Pinned runtime.** The squashfs is prefixed with the `type2-runtime` release `20251108`. Its SHA-256 is stored in `build/appimage/runtime-x86_64.sha256` and checked on every build, also for a cached download. If the file is missing, the build writes the hash of what it downloaded and asks for a review. A fixed release is used because "continuous" changes under the hash.
+- **Host libraries.** Qt 6 and KF6 are not bundled ([THIRD_PARTY.md](../THIRD_PARTY.md) lists them). The installer checks with `ldd` for missing libraries and for the QML modules `org/kde/kirigami` and `org/kde/kirigamiaddons/formcard`, and prints the `dnf` command if something is missing.
+- **Translations.** `po/LINGUAS` lists the languages. The build compiles each catalog with `msgfmt --check-format`, so a broken format string fails the build. The installer copies the `.mo` files to `~/.local/share/locale/<lang>/LC_MESSAGES/kuickshare.mo`, where KDE looks for them.
+- **Install.** Binaries are copied to a `.new` file and moved into place, so an update does not hit "text file busy". A running instance is stopped first (SIGTERM, then SIGKILL after 5 s) and restarted afterwards. The Dolphin entry is not reinstalled if `dolphin_integration` is `false` in the settings. `~/.local/bin/kuickshare` is linked only if it is missing or already ours.
+- **Uninstall.** `~/.local/share/kuickshare/uninstall.sh` removes the files above. User data stays unless `--purge` is given.

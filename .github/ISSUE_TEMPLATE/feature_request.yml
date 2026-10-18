@@ -1,0 +1,11 @@
+name: Feature request
+description: An idea for KuickShare
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like
+      description: The problem you want to solve, and how you imagine it working.
+    validations:
+      required: true

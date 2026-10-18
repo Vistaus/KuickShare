@@ -1,0 +1,20 @@
+[Global]
+IconName=io.github.the_beper.KuickShare
+Name=KuickShare
+Comment=Quick Share client for KDE
+DesktopEntry=io.github.the_beper.KuickShare
+
+[Event/incomingTransfer]
+Name=Incoming transfer
+Comment=A nearby device wants to share something with you
+Action=Popup
+
+[Event/transferFinished]
+Name=Transfer completed
+Comment=Files or text were received
+Action=Popup
+
+[Event/transferFailed]
+Name=Transfer failed
+Comment=A transfer was declined or interrupted
+Action=Popup
