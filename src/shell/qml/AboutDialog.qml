@@ -75,9 +75,9 @@ Kirigami.Dialog {
     standardButtons: Kirigami.Dialog.NoButton
     footer: null
     preferredWidth: Kirigami.Units.gridUnit * 24
-    // Room above and below for the opening animation, which moves the dialog: a dialog as tall as the window
-    // would be clamped to it and stretch while it moves. A taller content scrolls.
-    maximumHeight: absoluteMaximumHeight - Kirigami.Units.gridUnit * 3
+    // A little room above and below for the opening animation, which moves the dialog: a dialog as tall as the
+    // window would be clamped to it and stretch while it moves. A taller content scrolls.
+    maximumHeight: absoluteMaximumHeight - Kirigami.Units.gridUnit
 
     header: QQC2.Control {
         // Every side set on its own: the desktop style ignores `padding` for the top and bottom.
@@ -132,7 +132,8 @@ Kirigami.Dialog {
                 rightMargin: dialog.contentMargin
                 topMargin: dialog.contentMargin
             }
-            spacing: Kirigami.Units.largeSpacing
+            // Tight, so the content fits the window without scrolling; the section titles bring their own space.
+            spacing: Kirigami.Units.smallSpacing
 
             RowLayout {
                 spacing: Kirigami.Units.largeSpacing * 2
@@ -167,6 +168,8 @@ Kirigami.Dialog {
 
             Kirigami.Separator {
                 Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.smallSpacing * 2
+                Layout.bottomMargin: Kirigami.Units.smallSpacing * 2
             }
             Entry {
                 title: i18n("Homepage")

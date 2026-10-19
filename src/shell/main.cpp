@@ -1,4 +1,7 @@
+#include <malloc.h>
+
 #include <csignal>
+#include <memory>
 
 #include <QApplication>
 #include <QCommandLineParser>
@@ -6,9 +9,11 @@
 #include <QFileInfo>
 #include <QIcon>
 #include <QMenu>
+#include <QPointer>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QTimer>
 
 #include <KAboutData>
 #include <KDBusService>
@@ -68,29 +73,61 @@ int main(int argc, char *argv[])
     TransferWatcher transfers(&core);
     DndWatcher dnd(&core);
 
-    QQmlApplicationEngine engine;
-    KLocalization::setupLocalizedContext(&engine);
-    QVariantMap initial{{QStringLiteral("core"), QVariant::fromValue(&core)}};
-    if (parser.isSet(page))
+    std::unique_ptr<QQmlApplicationEngine> engine;
+    QString startPage = parser.value(page);
+    bool askIntegration = Integration::shouldAsk(parser.isSet(background));
+    auto ensureWindow = [&]() -> QQuickWindow *
     {
-        initial.insert(QStringLiteral("startPage"), parser.value(page));
-    }
-    initial.insert(QStringLiteral("askIntegration"), Integration::shouldAsk(parser.isSet(background)));
-    engine.setInitialProperties(initial);
-    engine.loadFromModule(QStringLiteral("io.github.the_beper.KuickShare"), QStringLiteral("Main"));
-    if (engine.rootObjects().isEmpty())
-    {
-        return 1;
-    }
-    auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst());
-
-    auto showWindow = [window]
-    {
-        window->show();
-        window->raise();
-        window->requestActivate();
+        if (engine)
+        {
+            return qobject_cast<QQuickWindow *>(engine->rootObjects().constFirst());
+        }
+        engine = std::make_unique<QQmlApplicationEngine>();
+        KLocalization::setupLocalizedContext(engine.get());
+        QVariantMap initial{{QStringLiteral("core"), QVariant::fromValue(&core)}, {QStringLiteral("askIntegration"), askIntegration}};
+        if (!startPage.isEmpty())
+        {
+            initial.insert(QStringLiteral("startPage"), startPage);
+        }
+        askIntegration = false;
+        startPage.clear();
+        engine->setInitialProperties(initial);
+        engine->loadFromModule(QStringLiteral("io.github.the_beper.KuickShare"), QStringLiteral("Main"));
+        if (engine->rootObjects().isEmpty())
+        {
+            engine.reset();
+            return nullptr;
+        }
+        QPointer<QQuickWindow> window = qobject_cast<QQuickWindow *>(engine->rootObjects().constFirst());
+        QObject::connect(window, &QQuickWindow::visibleChanged, &app, [&engine, &app, window](bool visible)
+                         {
+            if (visible)
+            {
+                return;
+            }
+            // Not from inside the close handler that hid the window.
+            QTimer::singleShot(0, &app, [&engine, window]
+                               {
+                if (window && !window->isVisible())
+                {
+                    engine.reset();
+#ifdef __GLIBC__
+                    malloc_trim(0);
+#endif
+                } }); });
+        return window;
     };
-    auto queueFiles = [window](const QStringList &paths, const QString &workingDirectory)
+
+    auto showWindow = [&]
+    {
+        if (auto *window = ensureWindow())
+        {
+            window->show();
+            window->raise();
+            window->requestActivate();
+        }
+    };
+    auto queueFiles = [&](const QStringList &paths, const QString &workingDirectory)
     {
         QStringList files;
         for (const QString &path : paths)
@@ -103,10 +140,13 @@ int main(int argc, char *argv[])
         }
         if (!files.isEmpty())
         {
-            QMetaObject::invokeMethod(window, "queueFiles", Q_ARG(QVariant, QVariant(files)));
+            if (auto *window = ensureWindow())
+            {
+                QMetaObject::invokeMethod(window, "queueFiles", Q_ARG(QVariant, QVariant(files)));
+            }
         }
     };
-    QObject::connect(&service, &KDBusService::activateRequested, window, [=](const QStringList &arguments, const QString &workingDirectory)
+    QObject::connect(&service, &KDBusService::activateRequested, &app, [=](const QStringList &arguments, const QString &workingDirectory)
                      {
         QCommandLineParser other;
         setupParser(other);
@@ -130,14 +170,17 @@ int main(int argc, char *argv[])
     applyTray();
     QObject::connect(&core, &CoreBridge::trayIconChanged, &tray, applyTray);
     tray.setStandardActionsEnabled(false);
-    QObject::connect(&tray, &KStatusNotifierItem::activateRequested, window, showWindow);
+    QObject::connect(&tray, &KStatusNotifierItem::activateRequested, &app, showWindow);
 
-    auto inWindow = [window, showWindow](const char *function)
+    auto inWindow = [&](const char *function)
     {
-        return [window, showWindow, function]
+        return [&, function]
         {
             showWindow();
-            QMetaObject::invokeMethod(window, function);
+            if (engine)
+            {
+                QMetaObject::invokeMethod(ensureWindow(), function);
+            }
         };
     };
 
@@ -154,7 +197,19 @@ int main(int argc, char *argv[])
                      { visible->setChecked(core.visible()); });
     menu->addSeparator();
     menu->addAction(QIcon::fromTheme(QStringLiteral("configure")), i18n("Preferences"), inWindow("showSettings"));
-    menu->addAction(QIcon::fromTheme(QStringLiteral("application-exit")), i18n("Quit"), inWindow("requestQuit"));
+
+    auto requestQuit = inWindow("requestQuit");
+    menu->addAction(QIcon::fromTheme(QStringLiteral("application-exit")), i18n("Quit"), [&, requestQuit]
+                    {
+        if (core.transferActive())
+        {
+            requestQuit();
+        }
+        else
+        {
+            tray.setStatus(KStatusNotifierItem::Passive);
+            app.quit();
+        } });
     tray.setContextMenu(menu);
 
     return app.exec();

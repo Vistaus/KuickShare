@@ -13,7 +13,6 @@
   <project_license>GPL-3.0-or-later</project_license>
   <description>
     <p>KuickShare is a KDE-native Quick Share client for Linux. It lets you send files to and receive files from nearby Android devices and other Quick Share clients.</p>
-    <p>It is derived from Packet and uses a Rust background service for the protocol and a Qt 6 / Kirigami interface that follows the Breeze look.</p>
     <ul>
       <li>Send files to nearby devices and receive files from them</li>
       <li>Tray icon, desktop notifications and job progress in Plasma</li>
@@ -41,6 +40,7 @@
     <control>keyboard</control>
   </recommends>
   <releases>
+    <release version="1.1.1" date="2026-10-19"/>
     <release version="1.1.0" date="2026-10-19"/>
     <release version="1.0.1" date="2026-10-19"/>
     <release version="1.0.0" date="2026-10-18"/>

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1
+
+- Lower memory use while the window is hidden: closing it now destroys the window and its QML engine, and opening it creates them again. Started with `--background` the shell takes about 60 MB instead of about 150 MB (RSS, measured with the host build). Files queued but not yet sent, the current page and open dialogs are lost when the window closes.
+- Quit from the tray menu exits at once, without flashing the window, unless a transfer is running (then the window opens to ask).
+
 ## 1.1.0
 
 - The AppImage is now a normal, self-contained AppImage (Anylinux): it brings Qt, KDE Frameworks and its own libc, runs on any distribution including NixOS and musl ones, follows the desktop theme, starts without installing anything and carries zsync update information. The first start asks once whether to add KuickShare to the application menu and Dolphin.

@@ -94,7 +94,7 @@ Uninstalling removes all of these except the data listed under [Where things are
 
 The window opens on the Send page and a tray icon appears. The computer is visible to nearby devices under the hostname, until you change the name in Preferences.
 
-The window has a fixed size. Closing it hides it in the tray and the service keeps running, so the computer can still receive. The tray icon opens the window on a left click. Its menu has these entries:
+The window has a fixed size. Closing it hides it in the tray and frees its memory (queued files and the current page are forgotten); the service keeps running, so the computer can still receive. The tray icon opens the window on a left click. Its menu has these entries:
 
 | Entry | Effect |
 |---|---|
@@ -103,7 +103,7 @@ The window has a fixed size. Closing it hides it in the tray and the service kee
 | Send clipboard | Add the clipboard to the Send page |
 | Visible to nearby devices | Same switch as in Preferences |
 | Preferences | Open Preferences |
-| Quit | Quit; asks first if a transfer is running |
+| Quit | Quit at once; if a transfer is running, opens the window to ask first |
 
 Without the tray icon (a preference), closing the window quits the app. See [Preferences](#preferences).
 
