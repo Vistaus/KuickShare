@@ -57,7 +57,7 @@ Update, uninstall and requirements are in the [usage guide](docs/usage.md).
 
 ## Status
 
-Version 1.0.0. It has been tested on Fedora 44 with KDE Plasma 6 only; other distributions and desktops are unverified.
+Version 1.0.1. Tested on Fedora 44 with KDE Plasma 6. On Arch (Qt 6.12) the installer and the core start in a container; the interface is not verified on a real Arch desktop. Other distributions and desktops are unverified.
 
 ## Credits and license
 

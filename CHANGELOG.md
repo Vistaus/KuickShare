@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- Fix the AppImage not starting on Arch-based distributions (Qt 6.12): no Qt private API, no copy relocations.
+- The installer dependency check shows the real error and an Arch install command.
+
 ## 1.0.0
 
 First release.
