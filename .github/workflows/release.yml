@@ -90,6 +90,11 @@ jobs:
           touch /run/.containerenv
           KUICKSHARE_FLATPAK_REPO="$PWD/pages/repo" build/flatpak/build-flatpak.sh --gpg-sign="$GPG_KEY_ID"
 
+      # Right after the signing: the smoke test creates /run/user/0, and from then on gpg looks for its agent in
+      # another place and no longer finds the imported key.
+      - name: Finish the repository
+        run: build/flatpak/publish-repo.sh pages "$SITE_URL"
+
       - name: Check the tag matches the built version
         run: |
           file=$(ls dist/KuickShare-*.flatpak)
@@ -99,9 +104,6 @@ jobs:
         run: |
           mkdir -p -m 700 /run/user/0
           XDG_RUNTIME_DIR=/run/user/0 dbus-run-session -- build/flatpak/test-flatpak.sh dist/KuickShare-*.flatpak
-
-      - name: Finish the repository
-        run: build/flatpak/publish-repo.sh pages "$SITE_URL"
 
       - name: Publish to GitHub Pages
         env:
