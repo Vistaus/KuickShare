@@ -76,7 +76,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 APPDIR=${APPDIR:-$(cd "$here/../../.." && pwd)}
 src=$APPDIR/usr/share/kuickshare
 
-missing=$(ldd "$APPDIR/usr/bin/kuickshare" 2>/dev/null | awk '/not found/ {print $1}')
+missing=$(ldd "$APPDIR/usr/bin/kuickshare" 2>&1 | grep 'not found' | sed 's/^[[:space:]]*//')
 for module in org/kde/kirigami org/kde/kirigamiaddons/formcard; do
     found=0
     for dir in /usr/lib64/qt6/qml /usr/lib/qt6/qml /usr/lib/x86_64-linux-gnu/qt6/qml; do
@@ -89,6 +89,7 @@ if [ -n "$missing" ]; then
     echo "KuickShare needs these on the system:" >&2
     echo "$missing" >&2
     echo "On Fedora: sudo dnf install kf6-kirigami kf6-kirigami-addons qt6-qtdeclarative" >&2
+    echo "On Arch:   sudo pacman -S kirigami kirigami-addons qt6-declarative" >&2
     exit 1
 fi
 

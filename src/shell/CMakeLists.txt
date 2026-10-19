@@ -36,6 +36,7 @@ qt_add_resources(kuickshare servicemenu
 qt_add_qml_module(kuickshare
     URI io.github.the_beper.KuickShare
     RESOURCE_PREFIX /qt/qml
+    NO_CACHEGEN
     QML_FILES
         qml/Main.qml
         qml/TransfersPage.qml
@@ -52,6 +53,9 @@ target_link_libraries(kuickshare PRIVATE
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus Qt6::Widgets
     KF6::Kirigami KF6::I18n KF6::I18nQml KF6::CoreAddons KF6::DBusAddons KF6::StatusNotifierItem KF6::Notifications KF6::JobWidgets
 )
+
+# Qt 6.12+ (Arch) refuses executables that copy-relocate its data symbols.
+target_compile_options(kuickshare PRIVATE -mno-direct-extern-access)
 
 install(TARGETS kuickshare ${KDE_INSTALL_TARGETS_DEFAULT_ARGS})
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../../data/kuickshare.notifyrc DESTINATION ${KDE_INSTALL_KNOTIFYRCDIR})
