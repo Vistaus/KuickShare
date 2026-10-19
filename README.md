@@ -40,7 +40,7 @@ Three packages, all for KDE Plasma 6:
 | Package | For | How |
 |---|---|---|
 | Flatpak | Any distribution | Add the repository and install (below); updates arrive through the software center |
-| AppImage | Any distribution, including NixOS and musl ones | Download it from the [releases](https://github.com/the-beper/KuickShare/releases), make it executable and run it. It brings its own libraries and installs nothing; use it with an AppImage manager such as [Gear Lever](https://github.com/mijorus/gearlever), [AM / AppMan](https://github.com/ivan-hc/AM) or [soar](https://github.com/pkgforge/soar) |
+| AppImage | Any distribution | Download it from the [releases](https://github.com/the-beper/KuickShare/releases), make it executable and run it. It brings its own libraries and installs nothing; use it with an AppImage manager such as [Gear Lever](https://github.com/mijorus/gearlever), [AM / AppMan](https://github.com/ivan-hc/AM) or [soar](https://github.com/pkgforge/soar) |
 | Tarball | Fedora and distributions with Qt 6 and KDE Frameworks 6 | Download `KuickShare-<version>-x86_64.tar.gz`, extract it and run `install.sh`: it installs into `~/.local` and uses the system libraries |
 
 ```sh
@@ -62,10 +62,6 @@ Update, uninstall and requirements are in the [usage guide](docs/usage.md).
 | [Contributing](CONTRIBUTING.md) | Build, tests, translations, releases |
 | [Security](SECURITY.md) | Reporting a vulnerability, known limits |
 | [Changelog](CHANGELOG.md) | Release notes |
-
-## Status
-
-Version 1.0.2. The tarball installer is tested on Fedora 44 with KDE Plasma 6. The AppImage starts and answers on D-Bus (offscreen) in bare Debian, Alpine (musl) and NixOS containers; following the desktop theme, tray, notifications and the first-launch dialog are unverified on a real desktop. The Flatpak is tested only headless in a container (start, tray registration, Dolphin entry, file forwarding); notifications, job progress, the file chooser and Dolphin itself are unverified on a real desktop. On Arch (Qt 6.12) the installer and the core start in a container; the interface is not verified on a real Arch desktop. Other distributions and desktops are unverified.
 
 ## Credits and license
 
