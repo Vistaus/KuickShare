@@ -1,0 +1,8 @@
+#!/bin/sh
+# Sourced by the AppRun.sh that quick-sharun generates, before it picks the binary to start (installed as
+# $APPDIR/bin/00-kuickshare.hook by build/build-appimage.sh). The AppImage runs the bundled kuickshare directly,
+# with its arguments (FILES..., --background, --page NAME), and installs nothing.
+
+# Follow the host's Breeze theme (colors, fonts, icon theme from its kdeglobals) through the bundled plasma-integration.
+: "${QT_QPA_PLATFORMTHEME:=kde}"
+export QT_QPA_PLATFORMTHEME

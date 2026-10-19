@@ -290,42 +290,8 @@ Kirigami.ScrollablePage {
         spacing: Kirigami.Units.largeSpacing
         bottomMargin: Kirigami.Units.largeSpacing
 
-        // Entries slide in, fade out, and the others move to fill the gap.
-        add: Transition {
-            ParallelAnimation {
-                NumberAnimation {
-                    property: "opacity"
-                    from: 0
-                    to: 1
-                    duration: Kirigami.Units.longDuration
-                }
-                NumberAnimation {
-                    property: "y"
-                    from: ViewTransition.destination.y - Kirigami.Units.gridUnit
-                    duration: Kirigami.Units.longDuration
-                    easing.type: Easing.OutCubic
-                }
-            }
-        }
-        remove: Transition {
-            NumberAnimation {
-                property: "opacity"
-                to: 0
-                duration: Kirigami.Units.shortDuration
-            }
-        }
-        displaced: Transition {
-            NumberAnimation {
-                property: "y"
-                duration: Kirigami.Units.longDuration
-                easing.type: Easing.OutCubic
-            }
-            // An entry pushed down while it was still fading in must not stay invisible.
-            NumberAnimation {
-                property: "opacity"
-                to: 1
-            }
-        }
+        // No ListView transitions: a card that changes height while one runs leaves its neighbours overlapping,
+        // or half transparent. Entries animate themselves instead (see the delegate).
 
         header: ColumnLayout {
             x: Kirigami.Units.largeSpacing
@@ -403,10 +369,69 @@ Kirigami.ScrollablePage {
             implicitHeight: item.implicitHeight
             height: item.height
 
+            // How far the card is drawn from its cell while it slides into place; the cell itself is always
+            // where the list put it. A new entry starts a little above, and when the cell moves (an entry was
+            // added or removed above it, or a card above changed height) the card starts where it was.
+            property real shift: 0
+            property real lastY: NaN
+
+            onYChanged: {
+                if (!isNaN(lastY) && lastY !== y) {
+                    shift += lastY - y;
+                    slide.restart();
+                }
+                lastY = y;
+            }
+            ListView.onAdd: {
+                shift = -Kirigami.Units.gridUnit;
+                slide.restart();
+                fadeIn.restart();
+            }
+            // The entry stays in the list while it fades out.
+            ListView.onRemove: SequentialAnimation {
+                PropertyAction {
+                    target: cell
+                    property: "ListView.delayRemove"
+                    value: true
+                }
+                NumberAnimation {
+                    target: item
+                    property: "opacity"
+                    to: 0
+                    duration: Kirigami.Units.shortDuration
+                }
+                PropertyAction {
+                    target: cell
+                    property: "ListView.delayRemove"
+                    value: false
+                }
+            }
+
+            NumberAnimation {
+                id: fadeIn
+
+                target: item
+                property: "opacity"
+                from: 0
+                to: 1
+                duration: Kirigami.Units.longDuration
+            }
+
+            NumberAnimation {
+                id: slide
+
+                target: cell
+                property: "shift"
+                to: 0
+                duration: Kirigami.Units.longDuration
+                easing.type: Easing.OutCubic
+            }
+
             Kirigami.AbstractCard {
                 id: item
 
                 x: Kirigami.Units.largeSpacing
+                y: cell.shift
                 width: parent.width - Kirigami.Units.largeSpacing * 2
 
                 readonly property string transferId: cell.transferId

@@ -29,6 +29,8 @@
 #include "autostart.h"
 #include <kcoreaddons.h>
 #include "dolphinmenu.h"
+#include "integration.h"
+#include "launcher.h"
 
 namespace
 {
@@ -310,6 +312,11 @@ void CoreBridge::refreshProperties()
         {
             DolphinMenu::setEnabled(false);
         }
+        // A Flatpak has no installer to write the entry, so the app writes it.
+        if (dolphin && Launcher::inFlatpak() && !DolphinMenu::exists() && !DolphinMenu::setEnabled(true))
+        {
+            qWarning() << "Could not write the Dolphin entry";
+        }
         emit visibleChanged();
         emit deviceNameChanged();
         emit downloadDirChanged();
@@ -478,6 +485,26 @@ void CoreBridge::setDolphinIntegration(bool enabled)
     setRemoteProperty(QStringLiteral("DolphinIntegration"), enabled);
 }
 
+void CoreBridge::integrateAppImage()
+{
+    if (!Integration::installMenuEntry() || !DolphinMenu::setEnabled(true)) {
+        // Not remembered: it is asked again at the next start.
+        emit errorOccurred(i18n("Could not add KuickShare to the menus"));
+        return;
+    }
+    Integration::markAsked();
+    // The Dolphin entry now exists whatever the setting was, so the setting must say on.
+    m_dolphinIntegration = true;
+    emit dolphinIntegrationChanged();
+    setRemoteProperty(QStringLiteral("DolphinIntegration"), true);
+}
+
+void CoreBridge::declineIntegration()
+{
+    Integration::markAsked();
+    setDolphinIntegration(false);
+}
+
 void CoreBridge::setHistoryKeepDays(int days)
 {
     if (days == m_historyKeepDays)
@@ -555,6 +582,12 @@ void CoreBridge::setDeviceName(const QString &name)
 
 void CoreBridge::setDownloadDir(const QString &dir)
 {
+    // In a Flatpak a folder the sandbox does not share would accept the files and lose them.
+    if (!dir.isEmpty() && Launcher::inFlatpak() && !Launcher::isSharedWithHost(dir))
+    {
+        emit errorOccurred(i18n("The Flatpak has no access to %1. Allow it with: flatpak override --user --filesystem=\"%1\" %2", dir, Launcher::flatpakId()));
+        return;
+    }
     if (dir != m_downloadDir)
     {
         setRemoteProperty(QStringLiteral("DownloadDir"), dir);

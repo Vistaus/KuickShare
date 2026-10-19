@@ -10,44 +10,112 @@ permissions:
 jobs:
   appimage:
     runs-on: ubuntu-latest
-    container:
-      image: fedora:44
     steps:
-      - name: Install system packages
-        run: |
-          dnf install -y --setopt=install_weak_deps=False \
-            gcc gcc-c++ make cmake ninja-build pkgconf-pkg-config git \
-            dbus-devel dbus-daemon protobuf-compiler squashfs-tools curl \
-            qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel \
-            extra-cmake-modules \
-            kf6-kirigami-devel kf6-kstatusnotifieritem-devel kf6-knotifications-devel \
-            kf6-ki18n-devel kf6-kconfig-devel kf6-kcoreaddons-devel kf6-kdbusaddons-devel \
-            kf6-kio-devel kf6-kiconthemes-devel kf6-kirigami-addons
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The build runs in Podman containers (Arch for the AppImage, Fedora for the tarball), which the
+      # runner has; Rust comes from the runner's rustup, as on a developer machine.
       - name: Install Rust (stable)
-        run: |
-          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        run: rustup toolchain install stable --profile minimal && rustup default stable
 
-      - name: Build AppImage
+      - name: Build the AppImage and the tarball
         run: |
-          touch /run/.containerenv
           build/build-appimage.sh
+          build/build-tarball.sh
 
       - name: Check the tag matches the built version
         run: |
-          file=$(ls dist/KuickShare-*-x86_64.AppImage)
-          test "$file" = "dist/KuickShare-${GITHUB_REF_NAME#v}-x86_64.AppImage"
+          test -f "dist/KuickShare-${GITHUB_REF_NAME#v}-x86_64.AppImage"
+          test -f "dist/KuickShare-${GITHUB_REF_NAME#v}-x86_64.tar.gz"
+
+      - name: Test
+        run: |
+          build/appimage/test-appimage.sh dist/KuickShare-*-x86_64.AppImage
+          build/test-tarball.sh dist/KuickShare-*-x86_64.tar.gz
 
       - name: Checksum
         run: |
           cd dist
-          sha256sum KuickShare-*-x86_64.AppImage > SHA256SUMS
+          sha256sum KuickShare-*-x86_64.AppImage KuickShare-*-x86_64.tar.gz > SHA256SUMS
 
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
             dist/KuickShare-*-x86_64.AppImage
+            dist/KuickShare-*-x86_64.AppImage.zsync
+            dist/KuickShare-*-x86_64.tar.gz
             dist/SHA256SUMS
+
+  flatpak:
+    needs: appimage
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:44
+      options: --privileged
+    env:
+      SITE_URL: https://the-beper.github.io/KuickShare
+    steps:
+      - name: Install system packages
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            flatpak flatpak-builder git python3 python3-pip python3-aiohttp \
+            dbus-daemon appstream ostree gnupg2 xz curl \
+            xdg-desktop-portal fuse3 python3-gobject-base
+          pip install --no-cache-dir tomlkit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Fetch the published repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config --global --add safe.directory '*'
+          remote="https://x-access-token:$GH_TOKEN@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$remote" gh-pages >/dev/null; then
+            git clone --quiet --depth 1 --branch gh-pages "$remote" pages
+          else
+            mkdir pages
+          fi
+
+      - name: Import the signing key
+        env:
+          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+        run: |
+          test -n "$FLATPAK_GPG_PRIVATE_KEY" || { echo "secret FLATPAK_GPG_PRIVATE_KEY is not set (see CONTRIBUTING.md)"; exit 1; }
+          printf '%s\n' "$FLATPAK_GPG_PRIVATE_KEY" | gpg --batch --import
+          echo "GPG_KEY_ID=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/{print $10; exit}')" >> "$GITHUB_ENV"
+
+      - name: Build and sign
+        run: |
+          touch /run/.containerenv
+          KUICKSHARE_FLATPAK_REPO="$PWD/pages/repo" build/flatpak/build-flatpak.sh --gpg-sign="$GPG_KEY_ID"
+
+      - name: Check the tag matches the built version
+        run: |
+          file=$(ls dist/KuickShare-*.flatpak)
+          test "$file" = "dist/KuickShare-${GITHUB_REF_NAME#v}.flatpak"
+
+      - name: Smoke test
+        run: |
+          mkdir -p -m 700 /run/user/0
+          XDG_RUNTIME_DIR=/run/user/0 dbus-run-session -- build/flatpak/test-flatpak.sh dist/KuickShare-*.flatpak
+
+      - name: Finish the repository
+        run: build/flatpak/publish-repo.sh pages "$SITE_URL"
+
+      - name: Publish to GitHub Pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd pages
+          rm -rf .git repo/tmp
+          git init --quiet --initial-branch=gh-pages
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add --all
+          git commit --quiet -m "Flatpak repository for ${GITHUB_REF_NAME}"
+          git push --force "https://x-access-token:$GH_TOKEN@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: dist/KuickShare-*.flatpak

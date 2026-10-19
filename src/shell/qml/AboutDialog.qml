@@ -66,20 +66,35 @@ Kirigami.Dialog {
         }
     }
 
+    // The room around the header icon and the close button, the same on every side, and the room around the content.
+    readonly property real margin: Kirigami.Units.largeSpacing
+    readonly property real contentMargin: Kirigami.Units.largeSpacing * 2
+    readonly property real headerSize: Kirigami.Units.iconSizes.medium
+
     title: i18n("About")
     standardButtons: Kirigami.Dialog.NoButton
     footer: null
     preferredWidth: Kirigami.Units.gridUnit * 24
+    // Room above and below for the opening animation, which moves the dialog: a dialog as tall as the window
+    // would be clamped to it and stretch while it moves. A taller content scrolls.
+    maximumHeight: absoluteMaximumHeight - Kirigami.Units.gridUnit * 3
 
     header: QQC2.Control {
-        padding: Kirigami.Units.largeSpacing * 2
+        // Every side set on its own: the desktop style ignores `padding` for the top and bottom.
+        // The header spans the dialog border (1 px at the top and the sides); the content sits inside it.
+        topPadding: dialog.margin + 1
+        bottomPadding: dialog.margin
+        leftPadding: dialog.margin + 1
+        rightPadding: dialog.margin + 1
+        // The icon and the close button are the same size, so the header has the same room above, below and at the
+        // sides of what you see: the icon, and the box of the button (it shows when focused).
         contentItem: RowLayout {
             spacing: Kirigami.Units.largeSpacing
 
             Kirigami.Icon {
                 source: "help-about-symbolic"
-                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+                Layout.preferredWidth: dialog.headerSize
+                Layout.preferredHeight: dialog.headerSize
             }
             Kirigami.Heading {
                 level: 3
@@ -88,29 +103,35 @@ Kirigami.Dialog {
             }
             QQC2.ToolButton {
                 icon.name: "window-close"
+                icon.width: Kirigami.Units.iconSizes.smallMedium
+                icon.height: Kirigami.Units.iconSizes.smallMedium
                 display: QQC2.AbstractButton.IconOnly
                 text: i18n("Close")
+                Layout.preferredWidth: dialog.headerSize
+                Layout.preferredHeight: dialog.headerSize
                 onClicked: dialog.close()
             }
         }
     }
 
-    QQC2.ScrollView {
-        id: scroll
-
-        // The whole content: top margin, then the same room under it as at the sides (the dialog scrolls only
-        // if the window is too short for it).
-        implicitHeight: column.implicitHeight + Kirigami.Units.largeSpacing * 3
-        contentWidth: availableWidth
-        Layout.fillWidth: true
-        Layout.fillHeight: true
+    // The dialog only sizes itself from an Item's implicitHeight, and it scrolls the content when the window is too
+    // short. A ScrollView of our own that fills the dialog makes the height depend on the position, and the
+    // opening animation (which moves the dialog) then stretches the dialog.
+    // The content has its own margin on every side.
+    Item {
+        implicitHeight: column.implicitHeight + dialog.contentMargin * 2
 
         ColumnLayout {
             id: column
 
-            x: Kirigami.Units.largeSpacing * 2
-            y: Kirigami.Units.largeSpacing
-            width: scroll.availableWidth - Kirigami.Units.largeSpacing * 4
+            anchors {
+                left: parent.left
+                right: parent.right
+                top: parent.top
+                leftMargin: dialog.contentMargin
+                rightMargin: dialog.contentMargin
+                topMargin: dialog.contentMargin
+            }
             spacing: Kirigami.Units.largeSpacing
 
             RowLayout {
@@ -137,24 +158,16 @@ Kirigami.Dialog {
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
                     }
+                    QQC2.Label {
+                        text: "© 2026 the-beper"
+                        opacity: 0.7
+                    }
                 }
             }
 
             Kirigami.Separator {
                 Layout.fillWidth: true
             }
-            ColumnLayout {
-                spacing: 0
-
-                QQC2.Label {
-                    text: i18n("Copyright")
-                }
-                QQC2.Label {
-                    text: "© 2026 the-beper"
-                    opacity: 0.7
-                }
-            }
-
             Entry {
                 title: i18n("Homepage")
                 url: "https://github.com/the-beper/KuickShare"

@@ -1,6 +1,6 @@
 # Contributing
 
-KuickShare targets Fedora with KDE Plasma 6 only. Issues and pull requests are welcome; for anything larger than a small fix, open an issue first to agree on the approach.
+KuickShare targets KDE Plasma 6: the AppImage and the Flatpak any distribution, the tarball Fedora 44 and distributions with the same libraries. Issues and pull requests are welcome; for anything larger than a small fix, open an issue first to agree on the approach.
 
 ## Repository layout
 
@@ -10,12 +10,12 @@ KuickShare targets Fedora with KDE Plasma 6 only. Issues and pull requests are w
 | `src/core/` | Daemon `kuickshared`: Quick Share protocol ([`rqs_lib`](https://github.com/nozwock/rquickshare), pinned rev), settings, D-Bus API. Its unit tests sit next to the code |
 | `src/shell/` | C++ and QML app `kuickshare` (Qt 6, KF6, Kirigami), with its CMake project |
 | `tests/core/` | Rust integration tests; they start the daemon on a private D-Bus |
-| `tests/shell/` | Qt tests: transfer model, Dolphin menu entry, `Exec` quoting |
+| `tests/shell/` | Qt tests: transfer model, Dolphin menu entry, `Exec` quoting, Flatpak and AppImage launcher paths, first-launch integration |
 | `data/` | Files installed on the host: `.desktop`, metainfo, icons, notification definitions, Dolphin service menu |
-| `build/` | Build container (`build-env.sh`, `Containerfile`) and AppImage installer (`build-appimage.sh`, `appimage/`, `test-install.sh`) |
+| `build/` | Build container (`build-env.sh`, `Containerfile`), AppImage (`build-appimage.sh`, `appimage/`: Arch image, hook, test), tarball with its installer (`build-host-payload.sh`, `build-tarball.sh`, `appimage/install.sh`, `test-tarball.sh`) and Flatpak (`flatpak/`: manifest, build, test and repository scripts) |
 | `po/` | Translation catalogs |
 | `docs/` | User and design documentation |
-| `dist/` | Generated, not in git: the AppImage and `tmp/` (CMake builds, AppImage staging) |
+| `dist/` | Generated, not in git: the AppImage and its `.zsync`, the tarball, the Flatpak bundle and repository, and `tmp/` (CMake builds, staging) |
 
 ## Build
 
@@ -24,8 +24,13 @@ Dependencies live in a podman image defined by [`build/Containerfile`](build/Con
 ```sh
 build/build-env.sh cargo build
 build/build-env.sh sh -c 'cmake -S src/shell -B dist/tmp/cmake-dev -G Ninja && cmake --build dist/tmp/cmake-dev'
-build/build-appimage.sh    # dist/KuickShare-<version>-x86_64.AppImage
+build/build-appimage.sh    # dist/KuickShare-<version>-x86_64.AppImage and .zsync (Fedora and Arch images; first run is long)
+build/appimage/test-appimage.sh dist/KuickShare-<version>-x86_64.AppImage
+build/build-tarball.sh && build/test-tarball.sh dist/KuickShare-<version>-x86_64.tar.gz
+build/flatpak/build-flatpak.sh && build/flatpak/test-flatpak.sh dist/KuickShare-<version>.flatpak
 ```
+
+The Flatpak build runs in its own container image (`build/flatpak/Containerfile`, started with `--privileged` for bwrap). The KDE runtime, about 2 GB, and the build cache are kept in the podman volume `kuickshare-flatpak`; `podman volume rm kuickshare-flatpak` removes them. Nothing is installed on the host.
 
 ## Run from the build tree
 
@@ -95,7 +100,12 @@ This rebuilds `po/kuickshare.pot` from the files in `po/POTFILES.in` and merges 
 1. Set the new version in `Cargo.toml`, `src/shell/CMakeLists.txt` and the `<releases>` block of `data/io.github.the_beper.KuickShare.metainfo.xml`, and describe it in `CHANGELOG.md`.
 2. Tag it `vX.Y.Z`, matching the version, and push the tag.
 
-The tag triggers [`release.yml`](.github/workflows/release.yml): it builds the AppImage, checks that its version matches the tag, and publishes it with a `SHA256SUMS` file.
+The tag triggers [`release.yml`](.github/workflows/release.yml): it builds the AppImage and the tarball, checks that their version matches the tag, tests them and publishes them with the `.zsync` file and a `SHA256SUMS` file. It then builds the Flatpak, attaches the bundle and updates the repository on GitHub Pages.
+
+One-time setup for the Flatpak repository:
+
+1. Create a signing key without a passphrase and store its private part as the repository secret `FLATPAK_GPG_PRIVATE_KEY`: generate it in a scratch keyring (`export GNUPGHOME=$(mktemp -d)`) with `gpg --batch --pinentry-mode loopback --passphrase '' --quick-gen-key "KuickShare Flatpak" default default never`, then `gpg --armor --export-secret-keys "KuickShare Flatpak" | gh secret set FLATPAK_GPG_PRIVATE_KEY`. Keep a copy: a new key means every user must re-add the remote.
+2. After the first release, set Settings, Pages to deploy from the `gh-pages` branch (root).
 
 ## Proposing changes
 

@@ -6,33 +6,75 @@ KuickShare has two programs. `kuickshare` is the window, tray icon and notificat
 
 ## Requirements
 
-- Fedora 44 with KDE Plasma 6. Nothing else has been tried.
-- Packages: `kf6-kirigami`, `kf6-kirigami-addons`, `qt6-qtdeclarative`. The installer checks for them and prints the `dnf install` line if one is missing.
+- KDE Plasma 6. The AppImage and the Flatpak bring their own libraries (the Flatpak needs Flatpak and [Flathub](https://flathub.org/setup)). The tarball uses the system's Qt 6 and KDE Frameworks 6: on Fedora, `kf6-kirigami`, `kf6-kirigami-addons` and `qt6-qtdeclarative`. The installer checks for them and prints the `dnf install` (or `pacman`) line if one is missing.
 - The computer and the phone on the same Wi-Fi network. Bluetooth is used to find devices, never to move data. Wi-Fi Direct is not supported.
 - A Google account is not needed and cannot be used.
 
 ## Installing, updating and uninstalling
 
-The AppImage is an installer, not the program itself. Running it copies KuickShare into `~/.local` and starts it. Afterwards the AppImage can be deleted.
+### Flatpak
+
+```sh
+flatpak remote-add --user --if-not-exists kuickshare https://the-beper.github.io/KuickShare/kuickshare.flatpakrepo
+flatpak install --user kuickshare io.github.the_beper.KuickShare
+```
+
+The software center can add the repository from the same `.flatpakrepo` file. Updates come with `flatpak update` or the software center. A `.flatpak` bundle is also attached to each release (`flatpak install --user KuickShare-<version>.flatpak`).
+
+| Command | Effect |
+|---|---|
+| `flatpak run io.github.the_beper.KuickShare` | Start the app (also in the application menu) |
+| `flatpak uninstall io.github.the_beper.KuickShare` | Remove the program |
+| `flatpak uninstall --delete-data io.github.the_beper.KuickShare` | Also delete settings, history, paired devices and the identity key (`~/.var/app/io.github.the_beper.KuickShare`) |
+
+The sandbox is deliberately open where the integration needs it:
+
+| Permission | Why |
+|---|---|
+| Network | Quick Share and the pairing port |
+| `org.bluez` (system bus) | Finding devices over Bluetooth |
+| `org.kde.JobViewServer`, `org.freedesktop.Notifications`, `org.kde.StatusNotifierWatcher` | Job progress, Do Not Disturb, tray icon |
+| Downloads folder | Received files. Another download folder is refused with a message until you grant it: `flatpak override --user --filesystem=/path io.github.the_beper.KuickShare` |
+| `~/.local/share/kio/servicemenus` and `~/.config/autostart` (write) | The app writes the Dolphin entry and the autostart entry there, since Flatpak cannot export them |
+
+Both entries start the app through `flatpak run`. The app finds the host folders from where Flatpak mounts the two granted ones, so a custom `XDG_DATA_HOME` or `XDG_CONFIG_HOME` works (tested in a container); without such a mount it falls back to `~/.local/share` and `~/.config`. The AppImage and the Flatpak write the same Dolphin entry file, so install only one. Uninstalling the Flatpak leaves the two entries behind: remove `kuickshare-send.desktop` and `io.github.the_beper.KuickShare.desktop` from those folders. Files sent from Dolphin, the file chooser or by drag and drop reach the sandbox through the document portal. The hand-over of a file from a second launch is tested in a container; the file chooser and Dolphin are unverified on a real desktop.
+
+### AppImage
+
+A normal, self-contained AppImage: it brings its own libraries and runs on any distribution, including NixOS and musl ones. Running it starts KuickShare and installs nothing.
 
 ```sh
 chmod +x KuickShare-<version>-x86_64.AppImage
 ./KuickShare-<version>-x86_64.AppImage
 ```
 
-Running a newer AppImage updates the installation. A running instance is stopped and started again. Your settings, history and paired devices are not touched. If you turned off the Dolphin menu entry, an update does not bring it back.
+It can be managed with the usual tools ([Gear Lever](https://github.com/mijorus/gearlever), [AM / AppMan](https://github.com/ivan-hc/AM), [soar](https://github.com/pkgforge/soar)) and updates with `appimageupdatetool` or any updater that reads its embedded update information (zsync, GitHub releases).
+
+On the first start it asks once whether to add KuickShare to the application menu and Dolphin's context menu. "Add" writes the menu entry and the Dolphin entry, both pointing at the AppImage file (if you move the file, turn the Dolphin entry off and on again in Preferences); "Not now" turns the Dolphin entry off in Preferences. Nothing is asked if an installation or those entries already exist, or if the app starts with `--background`. The answer is remembered in `~/.config/kuickshare/integration-asked`; to remove the menu entry delete `~/.local/share/applications/io.github.the_beper.KuickShare.desktop` and the icons it installed.
 
 | Command | Effect |
 |---|---|
-| `KuickShare.AppImage` | Install or update, then start the app |
-| `KuickShare.AppImage file...` | Same, and queue the files on the Send page |
-| `KuickShare.AppImage --no-launch` | Install or update without starting the app (a running instance is still restarted) |
-| `KuickShare.AppImage --uninstall` | Remove the program; settings, history and paired devices stay |
-| `KuickShare.AppImage --uninstall --purge` | Also delete settings, history, paired devices and the identity key |
-| `~/.local/share/kuickshare/uninstall.sh` | Same as `--uninstall`, without the AppImage |
-| `~/.local/share/kuickshare/uninstall.sh --purge` | Same as `--uninstall --purge` |
+| `KuickShare.AppImage [file...]` | Start the app; the files are queued on the Send page |
 
-Paths follow `XDG_DATA_HOME` and `XDG_CONFIG_HOME` when set; the table shows the defaults.
+To install KuickShare into `~/.local` with the system's libraries instead, use the tarball (below).
+
+### Tarball
+
+For people who want neither the AppImage nor the Flatpak. It holds the program built against the system's Qt 6 and KDE Frameworks 6, and an installer that copies it into `~/.local`; afterwards the extracted folder can be deleted.
+
+```sh
+tar xf KuickShare-<version>-x86_64.tar.gz
+KuickShare-<version>/install.sh
+```
+
+| Command | Effect |
+|---|---|
+| `install.sh [--no-launch] [file...]` | Install or update, then start the app (`--no-launch` only installs; a running instance is still restarted); the files are queued on the Send page |
+| `install.sh --uninstall` | Remove the program; settings, history and paired devices stay |
+| `install.sh --uninstall --purge` | Also delete settings, history, paired devices and the identity key |
+| `~/.local/share/kuickshare/uninstall.sh [--purge]` | The same, without the tarball |
+
+What the tarball installer writes, under `XDG_DATA_HOME` and `XDG_CONFIG_HOME` when set; the table shows the defaults:
 
 | What | Where |
 |---|---|
@@ -244,6 +286,7 @@ Also listed in the app under More, Shortcuts.
 | History | `~/.local/share/kuickshare/history.json` |
 | Identity key (mode 600) | `~/.local/share/kuickshare/identity.json` |
 | Paired computers | `~/.local/share/kuickshare/peers.json` |
+| The same, in the Flatpak | `~/.var/app/io.github.the_beper.KuickShare/config/kuickshare/` and `.../data/kuickshare/` |
 | Logs | No log file. The service writes to the standard error of the window process, so they show in a terminal when you run `kuickshare` there. Where the desktop session keeps them otherwise is unverified |
 
 A settings file or an identity or peers file that cannot be parsed is moved to a `.bak` copy next to it (unverified for the last two: only the call site was seen) and defaults are used. An unreadable history file is ignored and logged. The log level can be raised for one run: `RUST_LOG=debug kuickshare`, since the service inherits the environment (unverified).

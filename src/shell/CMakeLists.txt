@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(kuickshare VERSION 1.0.1 LANGUAGES CXX)
+project(kuickshare VERSION 1.0.2 LANGUAGES CXX)
 add_compile_definitions(KUICKSHARE_VERSION="${PROJECT_VERSION}")
 
 find_package(ECM REQUIRED NO_MODULE)
@@ -22,6 +22,7 @@ qt_add_executable(kuickshare
     devicemodel.cpp
     autostart.cpp
     dolphinmenu.cpp
+    integration.cpp
     transferjob.cpp
     transferwatcher.cpp
     dndwatcher.cpp
@@ -32,6 +33,16 @@ qt_add_resources(kuickshare servicemenu
     PREFIX /data
     BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../data
     FILES ${CMAKE_CURRENT_SOURCE_DIR}/../../data/kuickshare-send.desktop)
+
+# The application menu entry and its icons, written when the AppImage is integrated.
+set(INTEGRATION_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../data/io.github.the_beper.KuickShare.desktop
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../data/icons/hicolor/scalable/apps/io.github.the_beper.KuickShare.svg
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../data/icons/hicolor/symbolic/apps/io.github.the_beper.KuickShare-symbolic.svg)
+qt_add_resources(kuickshare integration
+    PREFIX /data
+    BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../data
+    FILES ${INTEGRATION_FILES})
 
 qt_add_qml_module(kuickshare
     URI io.github.the_beper.KuickShare
@@ -47,6 +58,7 @@ qt_add_qml_module(kuickshare
         qml/ShortcutsDialog.qml
         qml/SectionTitle.qml
         qml/PairDialog.qml
+        qml/IntegrationDialog.qml
 )
 
 target_link_libraries(kuickshare PRIVATE
@@ -86,3 +98,21 @@ qt_add_executable(execquote_test ../../tests/shell/execquote_test.cpp)
 target_include_directories(execquote_test PRIVATE .)
 target_link_libraries(execquote_test PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME execquote COMMAND execquote_test)
+
+qt_add_executable(launcher_test ../../tests/shell/launcher_test.cpp)
+target_include_directories(launcher_test PRIVATE .)
+target_link_libraries(launcher_test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME launcher COMMAND launcher_test)
+
+qt_add_executable(integration_test ../../tests/shell/integration_test.cpp integration.cpp dolphinmenu.cpp)
+qt_add_resources(integration_test servicemenu
+    PREFIX /data
+    BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../data
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/../../data/kuickshare-send.desktop)
+qt_add_resources(integration_test integration
+    PREFIX /data
+    BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../data
+    FILES ${INTEGRATION_FILES})
+target_include_directories(integration_test PRIVATE .)
+target_link_libraries(integration_test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME integration COMMAND integration_test)

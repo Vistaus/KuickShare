@@ -125,6 +125,10 @@ public:
     Q_INVOKABLE bool transferActive() const;
     /// Puts every setting back to its default (history, paired and trusted devices stay).
     Q_INVOKABLE void resetSettings();
+    /// The AppImage's first-launch question, "Add": the application menu entry and the Dolphin entry.
+    Q_INVOKABLE void integrateAppImage();
+    /// The AppImage's first-launch question, "Not now": no Dolphin entry, and the setting shows it.
+    Q_INVOKABLE void declineIntegration();
     /// Files on the clipboard (copied in a file manager), or an image on it saved as a PNG: their paths.
     Q_INVOKABLE QStringList clipboardFiles() const;
     Q_INVOKABLE void openDownloadFolder() const;

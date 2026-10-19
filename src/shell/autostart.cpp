@@ -1,5 +1,6 @@
 #include "autostart.h"
 #include "execquote.h"
+#include "launcher.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -11,7 +12,7 @@ namespace
 {
     QString entryPath()
     {
-        return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) + QStringLiteral("/autostart/io.github.the_beper.KuickShare.desktop");
+        return Launcher::hostHome(Launcher::inFlatpak(), QStandardPaths::GenericConfigLocation) + QStringLiteral("/autostart/io.github.the_beper.KuickShare.desktop");
     }
 }
 
@@ -37,18 +38,17 @@ bool Autostart::setEnabled(bool enabled)
     {
         return false;
     }
-    // The Exec path is the running binary, so re-enable after moving the installation.
-    const QString exec = QCoreApplication::applicationFilePath();
+    const QString exec = Launcher::hostExec(Launcher::inFlatpak(), quoteForExec(QCoreApplication::applicationFilePath()), QStringLiteral("--background"));
     const QString content = QStringLiteral(
                                 "[Desktop Entry]\n"
                                 "Type=Application\n"
                                 "Name=KuickShare\n"
                                 "Comment=Quick Share client for KDE\n"
-                                "Exec=%1 --background\n"
+                                "Exec=%1\n"
                                 "Icon=io.github.the_beper.KuickShare\n"
                                 "Terminal=false\n"
                                 "X-KDE-autostart-after=panel\n")
-                                .arg(quoteForExec(exec));
+                                .arg(exec);
     file.write(content.toUtf8());
     return file.commit();
 }

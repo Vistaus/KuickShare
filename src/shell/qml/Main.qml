@@ -12,6 +12,8 @@ Kirigami.ApplicationWindow {
 
     required property var core
     property string startPage: "send"
+    // The AppImage asks once whether to add itself to the menus (decided in C++).
+    property bool askIntegration: false
 
     property string currentPage: ""
     // Files queued for sending; filled from the Send page or by dropping onto the window.
@@ -303,6 +305,10 @@ Kirigami.ApplicationWindow {
     ShortcutsDialog {
         id: shortcutsDialog
     }
+    IntegrationDialog {
+        id: integrationDialog
+        core: root.core
+    }
     AboutDialog {
         id: aboutDialog
         core: root.core
@@ -383,5 +389,23 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    Component.onCompleted: Qt.callLater(show, startPage)
+    // Asked once the service is up, because "Not now" changes one of its settings.
+    Connections {
+        target: root.core
+        enabled: root.askIntegration
+        function onConnectedChanged() {
+            if (root.core.connected) {
+                root.askIntegration = false;
+                integrationDialog.open();
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        Qt.callLater(show, startPage);
+        if (askIntegration && core.connected) {
+            askIntegration = false;
+            integrationDialog.open();
+        }
+    }
 }

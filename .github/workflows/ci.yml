@@ -78,3 +78,47 @@ jobs:
 
       - name: qmllint
         run: qmllint-qt6 -I /usr/lib64/qt6/qml src/shell/qml/*.qml
+
+  appimage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust (stable)
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - name: Build the AppImage and the tarball
+        run: |
+          build/build-appimage.sh
+          build/build-tarball.sh
+
+      - name: Test
+        run: |
+          build/appimage/test-appimage.sh dist/KuickShare-*-x86_64.AppImage
+          build/test-tarball.sh dist/KuickShare-*-x86_64.tar.gz
+
+  flatpak:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:44
+      options: --privileged
+    steps:
+      - name: Install system packages
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            flatpak flatpak-builder git python3 python3-pip python3-aiohttp \
+            dbus-daemon appstream ostree gnupg2 xz curl \
+            xdg-desktop-portal fuse3 python3-gobject-base
+          pip install --no-cache-dir tomlkit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build Flatpak
+        run: |
+          touch /run/.containerenv
+          build/flatpak/build-flatpak.sh
+
+      - name: Smoke test
+        run: |
+          mkdir -p -m 700 /run/user/0
+          XDG_RUNTIME_DIR=/run/user/0 dbus-run-session -- build/flatpak/test-flatpak.sh dist/KuickShare-*.flatpak

@@ -9,9 +9,9 @@ KuickShare is GPL-3.0-or-later (see [LICENSE](LICENSE)). It builds on the projec
 | [Packet](https://github.com/nozwock/packet) | GPL-3.0-or-later | KuickShare is derived from it |
 | [rquickshare / `rqs_lib`](https://github.com/nozwock/rquickshare) | GPL-3.0 | Quick Share protocol implementation, used as a Rust dependency (git rev pinned in `Cargo.toml`) |
 
-## System software (not bundled)
+## System software and bundled libraries
 
-The shell uses these from the host; the AppImage does not ship them, and the installer checks that they are present.
+The tarball installer and the Flatpak runtime-less parts use these from the host (the installer checks that they are present). The **AppImage ships them**: it bundles Qt 6, KDE Frameworks 6, Kirigami, the Plasma platform theme, the Breeze icons, glibc and the other libraries the two binaries load (built from Arch Linux packages by `quick-sharun`, see [`build/build-appimage.sh`](build/build-appimage.sh)), so their licenses apply to that file too (mostly LGPL, which allows relinking: the libraries are separate files inside the AppImage and can be replaced after `--appimage-extract`; the full list of bundled files is `find squashfs-root` after extracting). The Flatpak uses the KDE runtime instead.
 
 | Software | License |
 | --- | --- |
@@ -25,7 +25,7 @@ Icons are referenced by theme name and resolved from the system Breeze theme at 
 
 ## Rust crates
 
-The AppImage contains only the two binaries `kuickshare` and `kuickshared` (see [`build/build-appimage.sh`](build/build-appimage.sh)). All crates below are statically linked into `kuickshared`.
+The tarball (the host-library package) contains only the two binaries `kuickshare` and `kuickshared` (see [`build/build-host-payload.sh`](build/build-host-payload.sh)). All crates below are statically linked into `kuickshared`.
 
 The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal (non-dev, non-build-only) dependencies reachable from `kuickshare-core`, and covers all target platforms, so a few entries may not be compiled on Linux. Licenses are the SPDX expressions declared by each crate.
 

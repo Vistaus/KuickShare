@@ -1,0 +1,62 @@
+app-id: io.github.the_beper.KuickShare
+runtime: org.kde.Platform
+runtime-version: "6.11"
+sdk: org.kde.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: kuickshare
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # KDBusService (single instance) names the shell org.kde.kuickshare; without it the app does not start.
+  - --own-name=org.kde.kuickshare
+  # Bluetooth is used to find devices.
+  - --system-talk-name=org.bluez
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.kde.JobViewServer
+  # Received files; a download folder elsewhere needs a broader grant.
+  - --filesystem=xdg-download
+  # The Dolphin entry and the autostart entry live on the host.
+  - --filesystem=xdg-data/kio/servicemenus:create
+  - --filesystem=xdg-config/autostart:create
+
+modules:
+  - name: kuickshared
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/kuickshared/cargo
+    build-commands:
+      - cargo --offline build --release --locked
+      - install -Dm755 target/release/kuickshared /app/bin/kuickshared
+    sources:
+      - type: dir
+        path: ../..
+        skip: [.git, target, dist]
+      - cargo-sources.json
+
+  - name: kuickshare
+    buildsystem: cmake-ninja
+    subdir: src/shell
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    post-install:
+      - install -Dm644 /run/build/kuickshare/data/io.github.the_beper.KuickShare.metainfo.xml /app/share/metainfo/io.github.the_beper.KuickShare.metainfo.xml
+      # KF6 looks for notification definitions in knotifications6.
+      - install -Dm644 /run/build/kuickshare/data/kuickshare.notifyrc /app/share/knotifications6/kuickshare.notifyrc
+      - |
+        cd /run/build/kuickshare
+        for lang in $(cat po/LINGUAS); do
+          install -d /app/share/locale/$lang/LC_MESSAGES
+          msgfmt --check-format -o /app/share/locale/$lang/LC_MESSAGES/kuickshare.mo po/$lang.po
+        done
+    sources:
+      - type: dir
+        path: ../..
+        skip: [.git, target, dist]

@@ -1,5 +1,6 @@
 #include "dolphinmenu.h"
 #include "execquote.h"
+#include "launcher.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -12,7 +13,7 @@ namespace
 {
     QString entryPath()
     {
-        return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/kio/servicemenus/kuickshare-send.desktop");
+        return Launcher::hostHome(Launcher::inFlatpak(), QStandardPaths::GenericDataLocation) + QStringLiteral("/kio/servicemenus/kuickshare-send.desktop");
     }
 }
 
@@ -36,7 +37,9 @@ bool DolphinMenu::setEnabled(bool enabled)
         return false;
     }
     QByteArray content = source.readAll();
-    content.replace("Exec=kuickshare %F", QByteArrayLiteral("Exec=") + quoteForExec(QCoreApplication::applicationFilePath()).toUtf8() + QByteArrayLiteral(" %F"));
+    const bool flatpak = Launcher::inFlatpak();
+    const QString exec = Launcher::hostExec(flatpak, quoteForExec(QCoreApplication::applicationFilePath()), flatpak ? QStringLiteral("@@ %F @@") : QStringLiteral("%F"));
+    content.replace("Exec=kuickshare %F", QByteArrayLiteral("Exec=") + exec.toUtf8());
 
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text))

@@ -2,6 +2,7 @@ src/shell/corebridge.cpp
 src/shell/main.cpp
 src/shell/qml/AboutDialog.qml
 src/shell/qml/HelpPage.qml
+src/shell/qml/IntegrationDialog.qml
 src/shell/qml/Main.qml
 src/shell/qml/PairDialog.qml
 src/shell/qml/SendPage.qml

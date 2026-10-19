@@ -1,0 +1,26 @@
+# Build image of the self-contained AppImage (see build/build-appimage.sh). Arch is what Anylinux recommends:
+# its libraries are the newest and it keeps 32-bit libraries out of /usr/lib.
+# The Qt 6 / KF6 packages here are what ends up inside the AppImage; the Fedora image (build/Containerfile)
+# only builds the host-linked payload.
+# The base image and the packages are rolling on purpose (the newest Qt/KF6 is what Anylinux wants), so a rebuild can
+# differ; only quick-sharun and its helpers are pinned.
+FROM docker.io/library/archlinux:latest
+
+# quick-sharun, pinned by commit and SHA-256. It pins sharun, appimagetool, onelf and cross-libc-dlopen itself and
+# fails on a mismatch (SKIP_INTEGRITY_CHECKS is never set). Bump all of this together, after reading the diff.
+ARG QUICK_SHARUN_REV=c1765eca5a1e036d6ffbd89a56019ae6c2da5b91
+ARG QUICK_SHARUN_SHA256=b38ac233f0b56a03bb10565f6b074a43ce016939faee44ae8bb23d6e66c2d553
+
+RUN pacman -Syu --noconfirm --needed \
+        base-devel cmake ninja extra-cmake-modules git curl rust protobuf dbus gettext \
+        strace patchelf binutils file zsync squashfs-tools xorg-xauth \
+        qt6-base qt6-declarative qt6-svg qt6-wayland \
+        kirigami kirigami-addons knotifications kstatusnotifieritem ki18n kconfig kcoreaddons kdbusaddons \
+        kio kiconthemes kjobwidgets \
+        qqc2-desktop-style qqc2-breeze-style breeze breeze-icons plasma-integration \
+    && pacman -Scc --noconfirm
+
+RUN curl -fsSL -o /usr/local/bin/quick-sharun \
+        "https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/$QUICK_SHARUN_REV/useful-tools/quick-sharun.sh" \
+    && echo "$QUICK_SHARUN_SHA256  /usr/local/bin/quick-sharun" | sha256sum -c - \
+    && chmod 755 /usr/local/bin/quick-sharun

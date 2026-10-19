@@ -18,6 +18,7 @@
 #include <KStatusNotifierItem>
 
 #include "corebridge.h"
+#include "integration.h"
 #include "dndwatcher.h"
 #include "transferwatcher.h"
 
@@ -57,7 +58,6 @@ int main(int argc, char *argv[])
     parser.process(app);
     about.processCommandLine(&parser);
 
-    // Quit cleanly on SIGTERM/SIGINT so the destructor stops the core process too.
     KSignalHandler::self()->watchSignal(SIGTERM);
     KSignalHandler::self()->watchSignal(SIGINT);
     QObject::connect(KSignalHandler::self(), &KSignalHandler::signalReceived, &app, &QApplication::quit);
@@ -75,6 +75,7 @@ int main(int argc, char *argv[])
     {
         initial.insert(QStringLiteral("startPage"), parser.value(page));
     }
+    initial.insert(QStringLiteral("askIntegration"), Integration::shouldAsk(parser.isSet(background)));
     engine.setInitialProperties(initial);
     engine.loadFromModule(QStringLiteral("io.github.the_beper.KuickShare"), QStringLiteral("Main"));
     if (engine.rootObjects().isEmpty())
@@ -89,7 +90,6 @@ int main(int argc, char *argv[])
         window->raise();
         window->requestActivate();
     };
-    // Files given on the command line are queued on the Send page, also by a second launch.
     auto queueFiles = [window](const QStringList &paths, const QString &workingDirectory)
     {
         QStringList files;
@@ -123,7 +123,6 @@ int main(int argc, char *argv[])
     tray.setCategory(KStatusNotifierItem::ApplicationStatus);
     tray.setIconByName(trayIcon);
     tray.setTitle(QStringLiteral("KuickShare"));
-    // Hidden until the core reports the setting, and while the setting is off.
     auto applyTray = [&tray, &core]
     {
         tray.setStatus(core.trayIcon() ? KStatusNotifierItem::Active : KStatusNotifierItem::Passive);
@@ -133,7 +132,6 @@ int main(int argc, char *argv[])
     tray.setStandardActionsEnabled(false);
     QObject::connect(&tray, &KStatusNotifierItem::activateRequested, window, showWindow);
 
-    // Runs a function of the main window (see Main.qml) after showing it.
     auto inWindow = [window, showWindow](const char *function)
     {
         return [window, showWindow, function]

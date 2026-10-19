@@ -1,8 +1,9 @@
 #!/bin/sh
-#   KuickShare.AppImage [files...]              install or update, then start the app
-#   KuickShare.AppImage --no-launch             install or update only
-#   KuickShare.AppImage --uninstall             remove the program; user data is kept
-#   KuickShare.AppImage --uninstall --purge     also remove settings, history and paired devices
+# Installs the program built against the system's Qt 6 / KDE Frameworks 6 into ~/.local, or removes it. Run by
+# the tarball's install.sh:
+#   install.sh [--no-launch] [files...]         install or update, then start the app (files are queued on the Send page)
+#   install.sh --uninstall                      remove the program; user data is kept
+#   install.sh --uninstall --purge              also remove settings, history and paired devices
 set -eu
 
 data=${XDG_DATA_HOME:-$HOME/.local/share}
@@ -10,6 +11,23 @@ config=${XDG_CONFIG_HOME:-$HOME/.config}
 app=$data/kuickshare
 bin=$app/bin
 appid=io.github.the_beper.KuickShare
+
+# A path as a double-quoted Exec argument, with the escapes the Desktop Entry specification wants (as quoteForExec in
+# src/shell/execquote.h): inside the quotes " ` $ and \ get a backslash (the backslash is doubled again for the
+# file) and % is %%.
+exec_quote() {
+    printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\\\\\/g' -e 's/["`$]/\\&/g' -e 's/%/%%/g')"
+}
+
+# Copies a desktop file with its Exec line replaced (ENVIRON, not awk -v, keeps the backslashes as they are).
+write_desktop() {
+    EXEC_LINE="Exec=$3" awk '/^Exec=/ { print ENVIRON["EXEC_LINE"]; next } { print }' "$1" > "$2"
+}
+
+# A path as a single-quoted shell word.
+sh_quote() {
+    printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
 
 # The shell and the service, whichever way they were started (the symlink in ~/.local/bin, the menu, autostart).
 running() {
@@ -75,8 +93,9 @@ fi
 here=$(cd "$(dirname "$0")" && pwd)
 APPDIR=${APPDIR:-$(cd "$here/../../.." && pwd)}
 src=$APPDIR/usr/share/kuickshare
+hostbin=$src/host/bin
 
-missing=$(ldd "$APPDIR/usr/bin/kuickshare" 2>&1 | grep 'not found' | sed 's/^[[:space:]]*//')
+missing=$(ldd "$hostbin/kuickshare" 2>&1 | grep 'not found' | sed 's/^[[:space:]]*//')
 for module in org/kde/kirigami org/kde/kirigamiaddons/formcard; do
     found=0
     for dir in /usr/lib64/qt6/qml /usr/lib/qt6/qml /usr/lib/x86_64-linux-gnu/qt6/qml; do
@@ -102,21 +121,21 @@ mkdir -p "$bin" "$data/applications" "$data/metainfo" "$data/kio/servicemenus" "
     "$data/icons/hicolor/scalable/apps" "$data/icons/hicolor/symbolic/apps" "$HOME/.local/bin"
 
 for file in kuickshare kuickshared; do
-    cp "$APPDIR/usr/bin/$file" "$bin/$file.new"
+    cp "$hostbin/$file" "$bin/$file.new"
     chmod 755 "$bin/$file.new"
     mv -f "$bin/$file.new" "$bin/$file"
 done
 cp "$src/install.sh" "$app/install.sh"
-printf '#!/bin/sh\nexec "%s/install.sh" --uninstall "$@"\n' "$app" > "$app/uninstall.sh"
+printf '#!/bin/sh\nexec %s --uninstall "$@"\n' "$(sh_quote "$app/install.sh")" > "$app/uninstall.sh"
 chmod 755 "$app/install.sh" "$app/uninstall.sh"
 cp "$src/VERSION" "$app/version"
 
-sed "s|^Exec=.*|Exec=\"$bin/kuickshare\" %U|" "$src/$appid.desktop" > "$data/applications/$appid.desktop"
+write_desktop "$src/$appid.desktop" "$data/applications/$appid.desktop" "$(exec_quote "$bin/kuickshare") %U"
 # Settings -> Integration -> Dolphin context menu: an update must not bring it back once it was turned off.
 if [ -f "$config/kuickshare/settings.json" ] && grep -Eq '"dolphin_integration"[[:space:]]*:[[:space:]]*false' "$config/kuickshare/settings.json"; then
     rm -f "$data/kio/servicemenus/kuickshare-send.desktop"
 else
-    sed "s|^Exec=.*|Exec=\"$bin/kuickshare\" %F|" "$src/kuickshare-send.desktop" > "$data/kio/servicemenus/kuickshare-send.desktop"
+    write_desktop "$src/kuickshare-send.desktop" "$data/kio/servicemenus/kuickshare-send.desktop" "$(exec_quote "$bin/kuickshare") %F"
     chmod 755 "$data/kio/servicemenus/kuickshare-send.desktop"
 fi
 cp "$src/$appid.metainfo.xml" "$data/metainfo/$appid.metainfo.xml"
@@ -137,9 +156,12 @@ else
 fi
 
 refresh_caches
-echo "KuickShare $(cat "$app/version") installed in $app. The AppImage can be deleted."
+echo "KuickShare $(cat "$app/version") installed in $app. The files you installed from can be deleted."
 echo "To remove it: $app/uninstall.sh"
 
 if [ "$launch" = 1 ] || [ "$restart" = 1 ]; then
+    # Run by the AppImage, this script inherits its environment: the installed program must not see it (APPIMAGE
+    # makes the shell act as the AppImage and write entries that point at the .AppImage file).
+    unset APPIMAGE APPDIR ARGV0 OWD
     setsid nohup "$bin/kuickshare" "$@" >/dev/null 2>&1 &
 fi

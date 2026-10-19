@@ -289,27 +289,61 @@ Not covered by automated tests:
 - Real Quick Share transfers (with a phone or between two instances): the consent, auto-accept and name-guard paths in `forward_transfers` have no test that feeds them library events.
 - Pairing between two real computers; it is tested over loopback only.
 - `CoreBridge`, notifications, progress jobs and the QML UI, beyond `qmllint`.
-- The AppImage: `build/test-install.sh` is a manual smoke test (install, start, update while running, uninstall with `--purge`) that needs a graphical KDE session.
+- The Flatpak: only the headless smoke test above. Notifications, job progress, the file chooser and Dolphin reading the entry are unverified.
+- The AppImage: `build/appimage/test-appimage.sh` is a headless smoke test in bare containers. Following the desktop theme, tray, notifications, file dialogs, GPU rendering, Wayland and the first-launch dialog are unverified on a real desktop. The tarball installer: `build/test-tarball.sh`, also headless.
 
 ## Packaging
 
-The AppImage is an installer, not a runtime container. Running it copies the program into `~/.local` and starts it; the file can then be deleted. Flatpak was rejected because it cannot export Dolphin service menus.
+Three packages ship the same sources:
+
+| | AppImage | Tarball | Flatpak |
+|---|---|---|---|
+| Libraries | Its own (Arch, Qt 6 and KF6, with ld.so and libc): runs on any distribution | System Qt 6 / KF6 | `org.kde.Platform` 6.11 |
+| Build | `build/build-appimage.sh` | `build/build-tarball.sh` | `build/flatpak/build-flatpak.sh` |
+| Distribution | GitHub release, with `.zsync` update information | GitHub release | Release asset (bundle) and a signed OSTree repository on GitHub Pages |
+| Dolphin entry, autostart | Written by the app when you say so, with `$APPIMAGE` as `Exec` | Written by the installer and the app | Written by the app at runtime into the host's folders, with `flatpak run` as `Exec` |
 
 ```mermaid
 flowchart LR
-    A["build/build-appimage.sh"] -->|"runs in"| B["podman image, Fedora 44 (build/Containerfile)"]
-    B --> C["cargo build --release --locked"]
-    B --> D["cmake + ninja, Release"]
-    B --> E["msgfmt: po/*.po to .mo"]
-    C & D & E --> F["AppDir: 2 binaries, data files, locale, install.sh"]
-    F --> G["mksquashfs (zstd) + type2 runtime"]
-    G --> H["dist/KuickShare-VERSION-x86_64.AppImage"]
-    H -->|"AppRun"| I["install.sh: copy into ~/.local, start"]
+    H["build/build-host-payload.sh<br/>Fedora container: host-linked binaries,<br/>data, install.sh"] --> T["tarball"]
+    R["Arch container: cargo + cmake<br/>quick-sharun bundle"] --> A["AppImage + .zsync"]
+    T -->|"install.sh"| I["copy into ~/.local"]
 ```
 
-- **Build environment.** `build/build-env.sh` builds `localhost/kuickshare-build:fedora44` from `build/Containerfile` and runs commands in it with the host's rustup and cargo mounted. The host needs no development packages.
-- **Pinned runtime.** The squashfs is prefixed with the `type2-runtime` release `20251108`. Its SHA-256 is stored in `build/appimage/runtime-x86_64.sha256` and checked on every build, also for a cached download. If the file is missing, the build writes the hash of what it downloaded and asks for a review. A fixed release is used because "continuous" changes under the hash.
-- **Host libraries.** Qt 6 and KF6 are not bundled ([THIRD_PARTY.md](../THIRD_PARTY.md) lists them). The installer checks with `ldd` for missing libraries and for the QML modules `org/kde/kirigami` and `org/kde/kirigamiaddons/formcard`, and prints the `dnf` command if something is missing.
-- **Translations.** `po/LINGUAS` lists the languages. The build compiles each catalog with `msgfmt --check-format`, so a broken format string fails the build. The installer copies the `.mo` files to `~/.local/share/locale/<lang>/LC_MESSAGES/kuickshare.mo`, where KDE looks for them.
-- **Install.** Binaries are copied to a `.new` file and moved into place, so an update does not hit "text file busy". A running instance is stopped first (SIGTERM, then SIGKILL after 5 s) and restarted afterwards. The Dolphin entry is not reinstalled if `dolphin_integration` is `false` in the settings. `~/.local/bin/kuickshare` is linked only if it is missing or already ours.
+### AppImage
+
+Built the [Anylinux](https://github.com/pkgforge-dev/Anylinux-AppImages) way, in the Arch image `build/appimage/Containerfile.arch`, with `quick-sharun` (pinned by commit and SHA-256 in the Containerfile; it pins and checks `sharun`, `appimagetool` and the other helpers it downloads). The bundle holds `kuickshare`, `kuickshared`, the dynamic loader and libc, Qt 6 and KF6, the Qt and KF6 plugins and only the QML modules the UI imports (`DEPLOY_QML=1` would copy about 450 MB). It ships no GPU drivers (the host's are used). The AppImage is about 73 MiB.
+
+- **Direct run.** The hook `build/appimage/anylinux.hook` (installed as `bin/00-kuickshare.hook`) lets a plain start run the bundled `kuickshare`. It sets `QT_QPA_PLATFORMTHEME=kde` (the bundle holds the Plasma platform theme and Breeze icons) so the app follows the host's theme, read from the host's `~/.config`.
+- **Core.** `kuickshared` is started by the shell from its own folder. In the bundle it is a small script that runs the real binary (renamed `kuickshared-core`) through `sharun`, so it uses the bundled libc.
+- **`$APPIMAGE`.** The AppImage runs from a temporary mount, so `Launcher::inAppImage()` (`src/shell/launcher.h`; `APPIMAGE` names an existing file and the program is inside `APPDIR`, so a tarball installation started from a terminal that inherited `APPIMAGE` is not taken for the AppImage) makes the Dolphin, autostart and menu entries point at the `$APPIMAGE` file. Nothing is written by itself: the first start asks once (`src/shell/integration.cpp`, `IntegrationDialog.qml`), and the Preferences toggles write entries on demand.
+- **Updates.** `appimagetool` embeds `gh-releases-zsync|the-beper|KuickShare|latest|KuickShare-*-x86_64.AppImage.zsync` and writes the `.zsync` file, which the release publishes.
+- **Cache.** The Podman volume `kuickshare-appimage` keeps the cargo registry; each build uses a fresh `TMPDIR` because `quick-sharun` does not re-check cached files.
+- **Test.** `build/appimage/test-appimage.sh` runs the AppImage with `--appimage-extract-and-run` (no FUSE) in bare Debian, Alpine and `nixos/nix` containers with only `dbus`: the core answers on D-Bus, no QML or plugin errors, only its own data is written, and a second launch hands its files over.
+
+### Tarball
+
+`build/build-host-payload.sh` builds, in the Fedora image (`build/Containerfile`, started by `build/build-env.sh`, with the host's rustup and cargo mounted; the host needs no development packages), `kuickshare` and `kuickshared` against the system's Qt 6 / KF6 and stages them with the data files, the compiled translations (`msgfmt --check-format`, so a broken format string fails the build) and `build/appimage/install.sh` in `dist/tmp/host`. `build/build-tarball.sh` packs that folder with a top-level `install.sh` into a reproducible `.tar.gz`; 
+
+- **Host libraries.** Qt 6 and KF6 are not bundled in the payload ([THIRD_PARTY.md](../THIRD_PARTY.md) lists them). The installer checks with `ldd` for missing libraries and for the QML modules `org/kde/kirigami` and `org/kde/kirigamiaddons/formcard`, and prints the `dnf` or `pacman` command if something is missing.
+- **Install.** Binaries are copied to a `.new` file and moved into place, so an update does not hit "text file busy". A running instance is stopped first (SIGTERM, then SIGKILL after 5 s) and restarted afterwards. The Dolphin entry is not reinstalled if `dolphin_integration` is `false` in the settings. `~/.local/bin/kuickshare` is linked only if it is missing or already ours. The translations go to `~/.local/share/locale/<lang>/LC_MESSAGES/kuickshare.mo`, where KDE looks for them.
 - **Uninstall.** `~/.local/share/kuickshare/uninstall.sh` removes the files above. User data stays unless `--purge` is given.
+- **Test.** `build/test-tarball.sh` installs, updates and uninstalls (`--purge`) in the Fedora image with a throw-away `HOME`.
+
+### Flatpak
+
+The manifest is [`build/flatpak/io.github.the_beper.KuickShare.yml`](../build/flatpak/io.github.the_beper.KuickShare.yml): one module for the Rust core (offline, with `cargo-sources.json` generated from `Cargo.lock` by `flatpak-cargo-generator`) and one CMake module for the shell.
+
+```mermaid
+flowchart LR
+    A["build/flatpak/build-flatpak.sh"] -->|"runs in"| B["podman image, Fedora 44 (build/flatpak/Containerfile)"]
+    B --> C["flatpak-builder: KDE 6.11 SDK, rust-stable"]
+    C --> D["OSTree repo + dist/KuickShare-VERSION.flatpak"]
+    D -->|"release.yml: sign, publish-repo.sh"| E["GitHub Pages: repo/, .flatpakrepo, .flatpakref"]
+```
+
+- **Build environment.** The container needs `--privileged` for bwrap. Runtimes and the build cache live in the podman volume `kuickshare-flatpak`, not on the host.
+- **Sandbox holes.** The permissions are listed in the [usage guide](usage.md#flatpak). The shell must own `org.kde.kuickshare` (`KDBusService`; the app does not start without it). The tray item registers with its connection name, so it needs no name of its own (tested against a fake watcher).
+- **Paths.** Inside the sandbox `XDG_*` point to `~/.var/app/<id>`, so `src/shell/launcher.h` finds the host's data and config folders in `/proc/self/mountinfo`, where Flatpak mounts the granted `kio/servicemenus` and `autostart` folders at their host paths (default `$HOME/.local/share` and `$HOME/.config` if none is found), for the Dolphin and autostart entries. A download folder is accepted only if it is under a mount that is not one of the sandbox's private ones (`/tmp`, `/run`, `/usr`, ...), or under a portal document or `/run/media`; otherwise files written there would be lost with the sandbox. This check is covered by unit tests on sample mount tables, not yet in a real sandbox. `Exec` becomes `flatpak run --file-forwarding <id> @@ %F @@`, which hands the files to the sandbox through the document portal. With no installer, the shell writes the Dolphin entry on start when the setting is on and the file is missing.
+- **Repository.** `release.yml` builds with `--gpg-sign` (secret `FLATPAK_GPG_PRIVATE_KEY`), adds the commit to the repository fetched from the `gh-pages` branch, and `build/flatpak/publish-repo.sh` prunes it and writes `kuickshare.flatpakrepo` and `kuickshare.flatpakref` with the public key. The branch is replaced by a single commit each release so OSTree objects do not pile up in the git history.
+- **Test.** `build/flatpak/test-flatpak.sh` installs the bundle in a container with offscreen Qt and a private session bus, and with non-default `XDG_*` folders, a fake `StatusNotifierWatcher` and the document portal. It checks that the core answers on D-Bus, the tray item registers, the Dolphin entry lands in the host folder, a file is forwarded to the sandbox and a second launch hands over to the running instance. Notifications, job progress, the file chooser and Dolphin itself need a real Plasma session and are untested.
