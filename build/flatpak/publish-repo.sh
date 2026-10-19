@@ -11,6 +11,7 @@ url=${2%/}
 id=io.github.the_beper.KuickShare
 : "${GPG_KEY_ID:?set GPG_KEY_ID to the signing key}"
 
+mkdir -p "$site/repo/refs/heads" "$site/repo/refs/mirrors" "$site/repo/refs/remotes" "$site/repo/tmp"
 flatpak build-update-repo --gpg-sign="$GPG_KEY_ID" --generate-static-deltas --prune --prune-depth=3 "$site/repo"
 key=$(gpg --export "$GPG_KEY_ID" | base64 -w0)
 
