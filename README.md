@@ -33,6 +33,9 @@ I would love to use KDE Connect, but unfortunately its data transfer feature has
 - Tray icon, start at login, Do Not Disturb aware.
 - English and Italian interface.
 
+> [!NOTE]
+> AirDrop cannot be supported. It needs Apple's AWDL Wi-Fi link, which on Linux works only with a few Wi-Fi chips that allow monitor mode and packet injection. Google's AirDrop support in Quick Share on Pixel phones relies on Android-side code and does not change the Quick Share protocol KuickShare speaks. Wi-Fi Direct is possible but not implemented: see the [study](docs/wifi-direct.md).
+
 ## Install
 
 Three packages, all for KDE Plasma 6:
@@ -58,6 +61,7 @@ Update, uninstall and requirements are in the [usage guide](docs/usage.md).
 |---|---|
 | [Usage](docs/usage.md) | Install, update, uninstall, everyday use, trusted and paired devices |
 | [Architecture](docs/architecture.md) | Design, security model, packaging |
+| [Wi-Fi Direct](docs/wifi-direct.md) | Feasibility study: prior art, requirements, limits (not implemented) |
 | [D-Bus API](docs/dbus-api.md) | The interface of the background service |
 | [Contributing](CONTRIBUTING.md) | Build, tests, translations, releases |
 | [Security](SECURITY.md) | Reporting a vulnerability, known limits |
