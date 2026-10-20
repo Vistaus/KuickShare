@@ -47,8 +47,9 @@ use crate::sharing_nearby::{
 };
 use crate::upgrade::{self, Reply, UpgradeEvent, UpgradeState};
 use crate::utils::{
-    DeviceType, RemoteDeviceInfo, create_text_preview, encode_point, gen_ecdsa_keypair, gen_random,
-    hkdf_extract_expand, read_length_prefix, stream_read_exact, to_four_digit_string,
+    DeviceType, RemoteDeviceInfo, create_text_preview, decode_point, encode_point,
+    gen_ecdsa_keypair, gen_random, hkdf_extract_expand, read_length_prefix, stream_read_exact,
+    to_four_digit_string,
 };
 use crate::{DEVICE_NAME, location_nearby_connections, sharing_nearby};
 
@@ -1402,20 +1403,12 @@ impl OutboundRequest {
             .ok_or_else(|| anyhow!("Missing required fields"))?;
 
         let mut bytes = vec![0x04];
-        // Ensure no more than 32 bytes for the keys
-        if peer_p256_key.x.len() > 32 {
-            bytes.extend_from_slice(&peer_p256_key.x[peer_p256_key.x.len() - 32..]);
-        } else {
-            bytes.extend_from_slice(&peer_p256_key.x);
-        }
-        if peer_p256_key.y.len() > 32 {
-            bytes.extend_from_slice(&peer_p256_key.y[peer_p256_key.y.len() - 32..]);
-        } else {
-            bytes.extend_from_slice(&peer_p256_key.y);
-        }
+        bytes.extend(decode_point(&peer_p256_key.x));
+        bytes.extend(decode_point(&peer_p256_key.y));
 
         let encoded_point = EncodedPoint::from_bytes(bytes)?;
-        let peer_key = PublicKey::from_encoded_point(&encoded_point).unwrap();
+        let peer_key = Option::<PublicKey>::from(PublicKey::from_encoded_point(&encoded_point))
+            .ok_or_else(|| anyhow!("The peer's public key is not on the curve"))?;
         let priv_key = self.state.private_key.as_ref().unwrap();
 
         let dhs = diffie_hellman(priv_key.to_nonzero_scalar(), peer_key.as_affine());

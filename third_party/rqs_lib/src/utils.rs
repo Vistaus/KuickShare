@@ -161,6 +161,18 @@ pub fn encode_point(unsigned: Bytes) -> Result<Vec<u8>, anyhow::Error> {
     Ok(big_int.to_signed_bytes_be())
 }
 
+/// Turns a signed big-endian coordinate, as the peer sends it, into exactly 32 bytes: a sign byte
+/// is dropped and a coordinate whose leading zero bytes were trimmed is padded back.
+pub fn decode_point(signed: &[u8]) -> Vec<u8> {
+    if signed.len() >= 32 {
+        signed[signed.len() - 32..].to_vec()
+    } else {
+        let mut out = vec![0u8; 32 - signed.len()];
+        out.extend_from_slice(signed);
+        out
+    }
+}
+
 pub fn hkdf_extract_expand(
     salt: &[u8],
     input: &[u8],
@@ -248,6 +260,30 @@ pub fn create_text_preview(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decode_point_restores_32_bytes() {
+        // Every shape a peer can send for a coordinate: trimmed, exact, with a sign byte.
+        let mut full = [7u8; 32];
+        assert_eq!(decode_point(&full), full);
+        let mut signed = vec![0u8];
+        signed.extend_from_slice(&full);
+        assert_eq!(decode_point(&signed), full);
+        full[0] = 0;
+        assert_eq!(decode_point(&full[1..]), full);
+        full[1] = 0;
+        assert_eq!(decode_point(&full[2..]), full);
+    }
+
+    #[test]
+    fn encoded_points_round_trip_for_leading_zero_bytes() {
+        for lead in [0u8, 1, 0x80, 0xff] {
+            let mut coord = [0x55u8; 32];
+            coord[0] = lead;
+            let encoded = encode_point(Bytes::copy_from_slice(&coord)).unwrap();
+            assert_eq!(decode_point(&encoded), coord, "leading byte {lead:#x}");
+        }
+    }
 
     #[test]
     fn test_gen_and_parse_mdns_info() {

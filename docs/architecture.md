@@ -81,7 +81,7 @@ Settings that restart the engine (device name, static port, reset) are refused w
 
 ## Transfer data flow
 
-Transfer ids are `ip:port` of the remote side. Event and method names below are shortened; see [dbus-api.md](dbus-api.md).
+Transfer ids are `ip:port` of the remote side, or `ble:<endpoint>` for a phone found over Bluetooth. Event and method names below are shortened; see [dbus-api.md](dbus-api.md).
 
 ```mermaid
 sequenceDiagram
@@ -122,6 +122,38 @@ sequenceDiagram
 ```
 
 An announce that fails only logs a message. The transfer still goes out and the receiver asks its user.
+
+### Over Bluetooth (experimental)
+
+With the Wi-Fi upgrade setting on, a phone that shares no network with the computer takes the same path through `rqs_lib`, `Core` and the shell; only the first channel and the move to Wi-Fi differ. Details and status: [wifi-direct.md](wifi-direct.md).
+
+```mermaid
+sequenceDiagram
+    participant P as Phone
+    participant L as rqs_lib
+    participant C as Core
+    participant N as NetworkManager
+
+    Note over P,N: Incoming
+    P->>L: finds the BLE advertisement, GATT connection
+    L->>L: GATT bridge feeds a normal receive session
+    P->>L: UKEY2, connection request (same events as above)
+    L->>C: WaitingForUserConsent (always asks, no trust)
+    L->>C: link.host() asks for a hotspot
+    C->>N: AddAndActivateConnection2 (AP, DHCP server on port 67)
+    L->>P: UPGRADE_PATH_AVAILABLE (ssid, password)
+    P->>L: joins, TCP connect, files continue there
+
+    Note over P,N: Outgoing
+    C->>L: ScanBluetooth, then SendInfo with a ble: id
+    L->>P: rescan, L2CAP dial, UKEY2, connection request
+    P->>L: accepts and offers WIFI_DIRECT
+    L->>C: link.join(ssid, password)
+    C->>N: connect as a WPA2 client
+    L->>P: TCP connect, files continue there (plain frames)
+```
+
+If the move fails, the transfer stays on the Bluetooth channel (about 5 KB/s). The core reports a send that never starts within 25 s as a failed transfer.
 
 ## Transfer lifecycle
 
