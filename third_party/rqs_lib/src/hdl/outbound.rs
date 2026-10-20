@@ -76,6 +76,9 @@ pub struct OutboundRequest {
     length_filled: usize,
     /// Keep-alives ignored while the handshake waits for the ConnectionResponse.
     keep_alives_ignored: u8,
+    /// Frames are plain `[length][OfflineFrame]` (no SecureMessage): set once the upgrade
+    /// to a channel with disabled encryption completes.
+    plain_frames: bool,
     pub state: InnerState,
     sender: Sender<ChannelMessage>,
     receiver: Receiver<ChannelMessage>,
@@ -83,6 +86,8 @@ pub struct OutboundRequest {
     upgrade: UpgradeState,
     /// The offer being followed, echoed back if joining fails.
     offer: Option<UpgradePathInfo>,
+    /// Mediums of the connection request instead of the ones the upgrade link implies.
+    mediums: Option<Vec<i32>>,
 }
 
 impl OutboundRequest {
@@ -158,6 +163,7 @@ impl OutboundRequest {
             length_buf: [0; 4],
             length_filled: 0,
             keep_alives_ignored: 0,
+            plain_frames: false,
             state: InnerState {
                 id,
                 server_seq: 0,
@@ -172,7 +178,13 @@ impl OutboundRequest {
             payload,
             upgrade: UpgradeState::new(crate::wifi_link()),
             offer: None,
+            mediums: None,
         }
+    }
+
+    /// Call before [`Self::send_connection_request`].
+    pub fn set_mediums(&mut self, mediums: Vec<i32>) {
+        self.mediums = Some(mediums);
     }
 
     pub async fn handle(&mut self) -> Result<(), anyhow::Error> {
@@ -284,6 +296,11 @@ impl OutboundRequest {
                 )
                 .await;
             }
+            _ if self.plain_frames => {
+                trace!("Handling plain OfflineFrame");
+                let offline = location_nearby_connections::OfflineFrame::decode(&*frame_data)?;
+                self.process_offline_frame(&offline).await?;
+            }
             _ => {
                 trace!("Handling SecureMessage frame");
                 let smsg = SecureMessage::decode(&*frame_data)?;
@@ -312,12 +329,21 @@ impl OutboundRequest {
                         }
                         .serialize(),
                     ),
-                    mediums: if self.upgrade.enabled() {
-                        // The receiver hosts the hotspot we join; the LAN is where we are already.
-                        vec![Medium::WifiHotspot.into()]
+                    mediums: if let Some(m) = &self.mediums {
+                        m.clone()
+                    } else if self.upgrade.enabled() {
+                        // The receiver hosts the network we join; the LAN is where we are already.
+                        vec![Medium::WifiHotspot.into(), Medium::WifiDirect.into()]
                     } else {
                         vec![Medium::WifiLan.into()]
                     },
+                    medium_metadata: (self.mediums.is_none() && self.upgrade.enabled()).then(
+                        || location_nearby_connections::MediumMetadata {
+                            supports_5_ghz: Some(true),
+                            ap_frequency: Some(-1),
+                            ..Default::default()
+                        },
+                    ),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -532,6 +558,10 @@ impl OutboundRequest {
         }
 
         let offline = location_nearby_connections::OfflineFrame::decode(d2d_msg.message())?;
+        self.process_offline_frame(&offline).await
+    }
+
+    async fn process_offline_frame(&mut self, offline: &OfflineFrame) -> Result<(), anyhow::Error> {
         let v1_frame = offline
             .v1
             .as_ref()
@@ -613,7 +643,7 @@ impl OutboundRequest {
                 self.send_keepalive(true).await?;
             }
             location_nearby_connections::v1_frame::FrameType::BandwidthUpgradeNegotiation => {
-                self.process_bwu_frame(&offline).await?;
+                self.process_bwu_frame(offline).await?;
             }
             _ => {
                 error!("Unhandled offline frame encrypted: {:?}", offline);
@@ -870,8 +900,12 @@ impl OutboundRequest {
         match upgrade::info_to_credentials(info) {
             Ok(creds) => {
                 info!(
-                    "upgrade: receiver hosts {:?} ({} MHz, {}:{})",
-                    creds.ssid, creds.frequency_mhz, creds.gateway, creds.port
+                    "upgrade: receiver offers {:?}: ssid {:?}, {} MHz, {}:{}",
+                    info.medium(),
+                    creds.ssid,
+                    creds.frequency_mhz,
+                    creds.gateway,
+                    creds.port
                 );
                 let endpoint_id = String::from_utf8_lossy(&self.endpoint_id).into_owned();
                 let task = tokio::spawn(upgrade::prepare_join(
@@ -879,12 +913,18 @@ impl OutboundRequest {
                     creds,
                     endpoint_id,
                     info.supports_client_introduction_ack(),
+                    info.supports_disabling_encryption(),
                 ));
+                self.upgrade
+                    .set_disable_encryption(info.supports_disabling_encryption());
                 self.offer = Some(info.clone());
                 self.upgrade.begin_preparing(task);
             }
             Err(e) => {
-                warn!("upgrade: not possible ({e:#}); staying on the current channel");
+                warn!(
+                    "upgrade: {:?} offer not possible ({e:#}); staying on the current channel",
+                    info.medium()
+                );
                 self.upgrade.fail().await;
                 self.send_upgrade_failure(info.clone()).await;
             }
@@ -970,7 +1010,12 @@ impl OutboundRequest {
         // Let the peer read everything before the socket goes away.
         upgrade::close_gracefully(&mut self.socket).await;
         self.socket = MigratableStream::Tcp(new);
-        info!("upgrade: now on the hotspot");
+        self.plain_frames = self.upgrade.disable_encryption();
+        if self.plain_frames {
+            info!("upgrade: now on the hotspot, plain frames");
+        } else {
+            info!("upgrade: now on the hotspot");
+        }
     }
 
     /// Sends the text or the files after the receiver accepted.
@@ -1135,7 +1180,7 @@ impl OutboundRequest {
                         None => break,
                     };
 
-                    info!("> Currently sending {:?}", curr_state.file_url);
+                    trace!("> Currently sending {:?}", curr_state.file_url);
                     if curr_state.bytes_transferred == curr_state.total_size {
                         debug!("File {current} finished");
                         self.update_state(
@@ -1170,7 +1215,7 @@ impl OutboundRequest {
                 };
 
                 let sending_buffer = buffer[..bytes_read].to_vec();
-                info!(
+                trace!(
                     "> File ready: {bytes_read} bytes && {} && left to send: {} with current offset: {}",
                     sending_buffer.len(),
                     curr_state.total_size - curr_state.bytes_transferred,
@@ -1507,7 +1552,12 @@ impl OutboundRequest {
         Ok(())
     }
 
+    /// The one place that chooses the framing: SecureMessage, or plain after an upgrade
+    /// with disabled encryption.
     async fn encrypt_and_send(&mut self, frame: &OfflineFrame) -> Result<(), anyhow::Error> {
+        if self.plain_frames {
+            return self.send_frame(frame.encode_to_vec()).await;
+        }
         let d2d_msg = DeviceToDeviceMessage {
             sequence_number: Some(self.get_server_seq_inc().await),
             message: Some(frame.encode_to_vec()),
@@ -1636,5 +1686,41 @@ impl OutboundRequest {
         // some spare time to process channel's message. Otherwise it
         // get spammed by new requests. Currently set to 10 micro secs.
         tokio::time::sleep(SANITY_DURATION).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// After an upgrade with disabled encryption frames are bare OfflineFrames both ways.
+    #[tokio::test]
+    async fn plain_mode_reads_and_writes_bare_offline_frames() {
+        let (mut peer, ours) = tokio::io::duplex(4096);
+        let (bus, _rx) = tokio::sync::broadcast::channel(8);
+        let mut req = OutboundRequest::new_over(
+            *b"SEND",
+            MigratableStream::Duplex(ours),
+            "id".into(),
+            bus,
+            OutboundPayload::Text {
+                text: "x".into(),
+                text_type: TextPayloadType::Text,
+            },
+            RemoteDeviceInfo {
+                device_type: crate::DeviceType::Unknown,
+                name: "test".into(),
+            },
+        );
+        req.plain_frames = true;
+        req.state.state = TransferState::SentPairedKeyEncryption;
+
+        crate::upgrade::tests::write_plain_keep_alive(&mut peer).await;
+        tokio::time::timeout(Duration::from_secs(1), req.handle())
+            .await
+            .expect("handle() did not read the plain frame")
+            .unwrap();
+        let reply = upgrade::read_plain_frame(&mut peer).await.unwrap();
+        crate::upgrade::tests::assert_keep_alive_ack(&reply);
     }
 }

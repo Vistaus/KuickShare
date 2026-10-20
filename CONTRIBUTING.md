@@ -57,12 +57,25 @@ CI runs these on every push and pull request, in a `fedora:44` container ([`ci.y
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features                              # unit tests and tests/core; needs dbus-daemon
+cargo test -p rqs_lib                                  # the vendored library: not a workspace member, so not in the line above
 cmake -S src/shell -B dist/tmp/cmake-dev -G Ninja && cmake --build dist/tmp/cmake-dev
 ctest --test-dir dist/tmp/cmake-dev
 qmllint-qt6 -I /usr/lib64/qt6/qml src/shell/qml/*.qml
 ```
 
 Outside the build container, prefix the commands with `build/build-env.sh`; `dbus-daemon` is in the image.
+
+> [!NOTE]
+> `tests/core` starts `target/debug/kuickshared`. A binary with file capabilities (after `setcap`, see below) does not start in the container: delete it and run `cargo build` again before the tests.
+
+### Hand tests with a phone (Wi-Fi upgrade and Bluetooth)
+
+The feature needs a real adapter and phone and cannot run in CI. Build with `build/build-env.sh cargo build` and the GUI as above, then run the programs on the host:
+
+- Receiving needs the DHCP port: `sudo setcap cap_net_bind_service,cap_net_raw+ep target/debug/kuickshared` after every build. Sending needs no privileges.
+- Write the daemon log to a file: `RUST_LOG=info,rqs_lib::hdl::ble_receiver=debug,rqs_lib::upgrade=debug target/debug/kuickshared > kuickshared.log 2>&1` (it logs to stdout), and capture Bluetooth with `sudo btmon -w capture.btsnoop`.
+- The phone's side is in `adb logcat -s NearbyConnections NearbyMediums NearbySharing WifiP2pService` (USB debugging on).
+- Individual steps have `#[ignore]` tests: run `cargo test -p rqs_lib --no-run` (inside the container; the printed path is the test binary) and execute it on the host with `--ignored --nocapture <name>` (`probe_nearby_phones`, `send_small_file_to_phone`, `observe_upgrade_offer`, `send_through_rqs_api`).
 
 ## Code style
 

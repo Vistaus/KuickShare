@@ -9,6 +9,9 @@ use crate::utils::RemoteDeviceInfo;
 
 pub(crate) mod ble_receiver;
 #[cfg(all(feature = "experimental", target_os = "linux"))]
+pub(crate) mod ble_scan;
+mod ble_send;
+#[cfg(all(feature = "experimental", target_os = "linux"))]
 mod blea;
 #[cfg(all(feature = "experimental", target_os = "linux"))]
 pub use blea::*;

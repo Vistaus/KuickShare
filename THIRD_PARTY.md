@@ -15,10 +15,12 @@ KuickShare is GPL-3.0-or-later (see [LICENSE](LICENSE)). It builds on the projec
 
 | Change | Files |
 | --- | --- |
-| WIFI_HOTSPOT bandwidth upgrade (new) | `src/upgrade.rs`, `src/upgrade/tests.rs`; handlers in `src/hdl/inbound.rs`, `src/hdl/outbound.rs`; `src/lib.rs` (`set_wifi_link`) |
-| Receive session over a non-TCP stream, cancel-safe length prefix | `src/hdl/migratable.rs` (new), `src/hdl/inbound.rs`, `src/hdl/outbound.rs`, `src/utils.rs`, `src/manager.rs` |
-| BLE receiver (new) | `src/hdl/ble_receiver/`, `src/hdl/mod.rs`, `src/lib.rs` |
+| WIFI_HOTSPOT and WIFI_DIRECT bandwidth upgrade in both directions, plain frames when the host disables encryption (new) | `src/upgrade.rs`, `src/upgrade/tests.rs`; handlers in `src/hdl/inbound.rs`, `src/hdl/outbound.rs`; `src/lib.rs` (`set_wifi_link`) |
+| Receive session over a non-TCP stream, cancel-safe length prefix, keep-alive tolerance in the handshake | `src/hdl/migratable.rs` (new), `src/hdl/inbound.rs`, `src/hdl/outbound.rs`, `src/utils.rs`, `src/manager.rs` |
+| Bluetooth receiver (new) | `src/hdl/ble_receiver/`, `src/hdl/mod.rs`, `src/lib.rs` |
+| Bluetooth sender: windowed scan, L2CAP dial and bridge, BLE endpoints in `EndpointInfo` and `SendInfo` (new) | `src/hdl/ble_scan.rs`, `src/hdl/ble_send/`, `src/lib.rs`, `src/manager.rs`, `src/hdl/mdns_discovery.rs` |
 | BLE scanner removed (`src/hdl/ble.rs`, `btleplug`); periodic mDNS re-announce instead | `src/hdl/mdns.rs`, `src/lib.rs`, `Cargo.toml` |
+| Per-chunk logs lowered to `trace` | `src/hdl/inbound.rs`, `src/hdl/outbound.rs` |
 | Formatting only | `src/hdl/mdns_discovery.rs`, `src/hdl/blea.rs` (comment) |
 
 ## System software and bundled libraries

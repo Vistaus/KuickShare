@@ -88,6 +88,11 @@ target_include_directories(transfermodel_test PRIVATE .)
 target_link_libraries(transfermodel_test PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME transfermodel COMMAND transfermodel_test)
 
+qt_add_executable(devicemodel_test ../../tests/shell/devicemodel_test.cpp devicemodel.cpp)
+target_include_directories(devicemodel_test PRIVATE .)
+target_link_libraries(devicemodel_test PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME devicemodel COMMAND devicemodel_test)
+
 qt_add_executable(dolphinmenu_test ../../tests/shell/dolphinmenu_test.cpp dolphinmenu.cpp)
 qt_add_resources(dolphinmenu_test servicemenu
     PREFIX /data

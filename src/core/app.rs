@@ -14,7 +14,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use rqs_lib::{
-    EndpointInfo, OutboundPayload, RQS, SendInfo, TextPayloadType, Visibility, WifiLink,
+    BleTarget, EndpointInfo, OutboundPayload, RQS, SendInfo, TextPayloadType, Visibility, WifiLink,
     channel::{ChannelMessage, Message, TransferAction},
 };
 use tokio::{
@@ -32,7 +32,7 @@ use crate::{
     trust::{self, Trust, TrustEvent},
 };
 
-/// Nearby devices found by discovery, keyed by endpoint id (`ip:port`).
+/// Nearby devices found by discovery, keyed by endpoint id (`ip:port`, or `ble:<id>` over Bluetooth).
 pub type Endpoints = Arc<StdMutex<HashMap<String, EndpointInfo>>>;
 /// IPs of nearby computers that run KuickShare and are paired with this one.
 pub type TrustedIps = Arc<StdMutex<HashSet<String>>>;
@@ -144,6 +144,9 @@ impl Core {
     }
 
     fn control_addr(&self, endpoint_id: &str) -> Result<SocketAddr> {
+        if BleTarget::parse(endpoint_id).is_some() {
+            bail!("Bluetooth devices cannot be paired");
+        }
         let ip = self
             .endpoints
             .lock()
@@ -386,6 +389,15 @@ impl Core {
         Ok(())
     }
 
+    /// Runs one more Bluetooth scan window; the devices arrive like the ones of `start_discovery`.
+    pub fn scan_bluetooth(&self) -> Result<()> {
+        let engine = self.engine.as_ref().context("service is not running")?;
+        if !engine.discovery_on {
+            bail!("discovery is not running");
+        }
+        engine.rqs.scan_ble(engine.discovery_tx.clone())
+    }
+
     pub fn stop_discovery(&mut self) {
         if let Some(engine) = &mut self.engine
             && engine.discovery_on
@@ -428,6 +440,10 @@ impl Core {
             .get(endpoint_id)
             .cloned()
             .with_context(|| format!("unknown device {endpoint_id}"))?;
+        let ble = endpoint.ble.is_some();
+        if ble && !self.settings.wifi_upgrade {
+            bail!("Sending over Bluetooth needs the Wi-Fi upgrade, which is off (see Settings)");
+        }
         // A paired KuickShare computer accepts the transfer by itself if it is told in advance.
         let trusted = endpoint
             .ip
@@ -440,21 +456,37 @@ impl Core {
                 tracing::info!("could not announce the transfer to the paired computer");
             }
         }
-        let send_info = SendInfo {
-            id: endpoint.id.clone(),
-            name: endpoint.name.clone().unwrap_or_default(),
-            addr: format!(
+        let name = endpoint.name.clone().unwrap_or_default();
+        let addr = if ble {
+            String::new()
+        } else {
+            format!(
                 "{}:{}",
                 endpoint.ip.unwrap_or_default(),
                 endpoint.port.unwrap_or_default()
-            ),
+            )
+        };
+        // The library only logs a failed scan or dial: without any event in time, tell the user.
+        let watch = if let (true, Some(conn)) = (ble, &self.conn) {
+            Some((conn.clone(), engine.rqs.message_sender.subscribe()))
+        } else {
+            None
+        };
+        let send_info = SendInfo {
+            id: endpoint.id.clone(),
+            name: name.clone(),
+            addr,
             ob,
         };
         engine
             .send_tx
             .send(send_info)
             .await
-            .context("service stopped while sending")
+            .context("service stopped while sending")?;
+        if let Some((conn, events)) = watch {
+            tokio::spawn(report_silent_send(conn, events, endpoint.id, name));
+        }
+        Ok(())
     }
 
     fn ensure_idle(&self) -> Result<()> {
@@ -546,6 +578,37 @@ impl Core {
             tracing::warn!("cannot save settings: {e:#}");
         }
     }
+}
+
+/// A Bluetooth send scans for at most 12 s and then dials.
+const BLE_START_TIMEOUT: Duration = Duration::from_secs(25);
+
+/// Waits for the first event of the transfer `id`; if none comes in time, the scan or the dial
+/// failed (the library only logs that) and the transfer is reported as failed.
+async fn report_silent_send(
+    conn: Connection,
+    mut events: broadcast::Receiver<ChannelMessage>,
+    id: String,
+    device: String,
+) {
+    let started = async {
+        loop {
+            match events.recv().await {
+                Ok(message) if message.id == id => return true,
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                // The service stopped: nothing to report.
+                Err(broadcast::error::RecvError::Closed) => return true,
+            }
+        }
+    };
+    if tokio::time::timeout(BLE_START_TIMEOUT, started)
+        .await
+        .is_ok()
+    {
+        return;
+    }
+    tracing::info!("no answer from {id}: reporting the Bluetooth send as failed");
+    dbus::emit_failed_transfer(&conn, &id, &device).await;
 }
 
 /// A transfer that has not been heard of for this long is taken to be over (its final event was

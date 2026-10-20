@@ -27,7 +27,9 @@ pub mod manager;
 pub mod upgrade;
 pub mod utils;
 
-pub use hdl::{EndpointInfo, OutboundPayload, TextPayloadType, TransferState, Visibility};
+pub use hdl::{
+    BleTarget, EndpointInfo, OutboundPayload, TextPayloadType, TransferState, Visibility,
+};
 pub use manager::SendInfo;
 pub use upgrade::{WifiCredentials, WifiLink};
 pub use utils::DeviceType;
@@ -61,6 +63,25 @@ static WIFI_LINK_SET: Lazy<watch::Sender<bool>> = Lazy::new(|| watch::channel(fa
 /// The link handlers pick up when a session starts.
 pub(crate) fn wifi_link() -> Option<Arc<dyn WifiLink>> {
     WIFI_LINK.read().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+#[cfg(all(feature = "experimental", target_os = "linux"))]
+fn spawn_ble_scan(
+    tracker: &TaskTracker,
+    ctk: CancellationToken,
+    sender: broadcast::Sender<EndpointInfo>,
+) {
+    tracker.spawn(async move {
+        tokio::select! {
+            () = ctk.cancelled() => {}
+            outcome = hdl::ble_scan::SCANNER.scan(&sender) => debug!("BLE scan: {outcome:?}"),
+        }
+    });
+}
+
+#[cfg(not(all(feature = "experimental", target_os = "linux")))]
+fn spawn_ble_scan(_: &TaskTracker, _: CancellationToken, _: broadcast::Sender<EndpointInfo>) {
+    debug!("BLE scan not supported in this build");
 }
 
 #[derive(Debug)]
@@ -221,9 +242,26 @@ impl RQS {
             });
         }
 
+        spawn_ble_scan(tracker, ctk.clone(), sender.clone());
+
         let discovery = MDnsDiscovery::new(sender)?;
         tracker.spawn(async move { discovery.run(ctk.clone()).await });
 
+        Ok(())
+    }
+
+    /// Runs one BLE scan window in the background and reports the phones in Receive mode
+    /// (`EndpointInfo::ble` set, `present` `Some(true)`, or `Some(false)` for those seen by
+    /// an earlier window and not by this one) on `sender`, the channel of `discovery`.
+    ///
+    /// Call it when the user asks for a refresh. It does nothing (debug log only) without a
+    /// Wi-Fi link, without a BlueZ adapter, while another window or a BLE send is running, and
+    /// within 4 s of the previous window's start. `discovery` already runs one window.
+    pub fn scan_ble(&self, sender: broadcast::Sender<EndpointInfo>) -> Result<(), anyhow::Error> {
+        let (Some(tracker), Some(ctk)) = (&self.tracker, &self.ctoken) else {
+            return Err(anyhow!("The service wasn't first started"));
+        };
+        spawn_ble_scan(tracker, ctk.clone(), sender);
         Ok(())
     }
 

@@ -18,6 +18,8 @@ public:
     void finish(bool success, bool quietly = false);
     void setSpeed(qulonglong bytesPerSecond);
     void setSummary(const QString &summary) { m_summary = summary; }
+    /// While the connection is being set up the job only says so and cannot be cancelled.
+    void setConnecting(bool connecting);
 
 Q_SIGNALS:
     void cancelRequested(const QString &id);
@@ -31,4 +33,7 @@ private:
     QString m_summary;
     bool m_outbound;
     bool m_done = false;
+    bool m_connecting = false;
+
+    void emitDescription();
 };

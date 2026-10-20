@@ -24,6 +24,8 @@ QVariant DeviceModel::data(const QModelIndex &index, int role) const
         return entry.address;
     case TrustRole:
         return entry.trust;
+    case MediumRole:
+        return entry.medium;
     }
     return {};
 }
@@ -36,6 +38,7 @@ QHash<int, QByteArray> DeviceModel::roleNames() const
         {TypeRole, "deviceType"},
         {AddressRole, "address"},
         {TrustRole, "trust"},
+        {MediumRole, "medium"},
     };
 }
 
@@ -51,9 +54,9 @@ int DeviceModel::indexOf(const QString &id) const
     return -1;
 }
 
-void DeviceModel::upsert(const QString &id, const QString &name, const QString &type, const QString &address, const QString &trust)
+void DeviceModel::upsert(const QString &id, const QString &name, const QString &type, const QString &address, const QString &trust, const QString &medium)
 {
-    const Entry entry{id, name, type, address, trust};
+    const Entry entry{id, name, type, address, trust, medium};
     if (const int row = indexOf(id); row >= 0)
     {
         m_entries[row] = entry;
@@ -82,4 +85,10 @@ void DeviceModel::clear()
     beginResetModel();
     m_entries.clear();
     endResetModel();
+}
+
+QString DeviceModel::nameOf(const QString &id) const
+{
+    const int row = indexOf(id);
+    return row < 0 ? QString() : m_entries.at(row).name;
 }

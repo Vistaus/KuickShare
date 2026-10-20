@@ -13,6 +13,8 @@ use crate::channel::{self, ChannelMessage, TransferAction};
 use crate::hdl::{
     InboundRequest, MigratableStream, OutboundPayload, OutboundRequest, TransferState,
 };
+use crate::location_nearby_connections::KeepAliveFrame;
+use crate::location_nearby_connections::bandwidth_upgrade_negotiation_frame::upgrade_path_info::WifiDirectCredentials;
 use crate::manager::{SendInfo, TcpServer};
 use crate::utils::RemoteDeviceInfo;
 
@@ -28,7 +30,7 @@ fn creds() -> WifiCredentials {
 
 #[test]
 fn credentials_survive_the_wire() {
-    let frame = path_available_frame(&creds());
+    let frame = path_available_frame(&creds(), false);
     let decoded = OfflineFrame::decode(&*frame.encode_to_vec()).unwrap();
     let bwu = parse_bwu(&decoded).unwrap();
     assert_eq!(bwu.event_type(), EventType::UpgradePathAvailable);
@@ -68,7 +70,7 @@ fn unknown_frequency_maps_to_zero() {
 
 #[test]
 fn plain_frames_have_the_expected_shape() {
-    let intro = client_introduction_frame("ABCD");
+    let intro = client_introduction_frame("ABCD", false);
     let bwu = parse_bwu(&intro).unwrap();
     assert_eq!(bwu.event_type(), EventType::ClientIntroduction);
     assert_eq!(
@@ -88,6 +90,35 @@ fn plain_frames_have_the_expected_shape() {
             .event_type(),
         EventType::SafeToClosePriorChannel
     );
+}
+
+#[test]
+fn offers_and_introductions_carry_the_encryption_flag() {
+    let wire = |f: &OfflineFrame| parse_bwu(f).unwrap().clone();
+    let default_offer = wire(&path_available_frame(&creds(), false));
+    let info = default_offer.upgrade_path_info.unwrap();
+    assert_eq!(info.supports_disabling_encryption, None);
+    assert!(!info.supports_disabling_encryption());
+
+    let offer = wire(&path_available_frame(&creds(), true));
+    assert_eq!(
+        offer
+            .upgrade_path_info
+            .unwrap()
+            .supports_disabling_encryption,
+        Some(true)
+    );
+
+    for flag in [false, true] {
+        let intro = wire(&client_introduction_frame("ABCD", flag));
+        assert_eq!(
+            intro
+                .client_introduction
+                .unwrap()
+                .supports_disabling_encryption,
+            Some(flag)
+        );
+    }
 }
 
 #[test]
@@ -152,8 +183,37 @@ fn handover_in_the_usual_order() {
     assert_eq!(h.on_peer_event(EventType::UpgradeFailure), Reply::Nothing);
 }
 
+/// Bytes seen by a `FakeLink` tap: (client to host, host to client).
+pub(crate) type Tap = Arc<std::sync::Mutex<(Vec<u8>, Vec<u8>)>>;
+
+/// Sends a plain keep-alive (no ack) to the handler under test.
+pub(crate) async fn write_plain_keep_alive<W: AsyncWrite + Unpin>(peer: &mut W) {
+    let frame = OfflineFrame {
+        version: Some(offline_frame::Version::V1.into()),
+        v1: Some(V1Frame {
+            r#type: Some(v1_frame::FrameType::KeepAlive.into()),
+            keep_alive: Some(KeepAliveFrame { ack: Some(false) }),
+            ..Default::default()
+        }),
+    };
+    let data = frame.encode_to_vec();
+    peer.write_all(&(data.len() as u32).to_be_bytes())
+        .await
+        .unwrap();
+    peer.write_all(&data).await.unwrap();
+}
+
+/// Asserts that `frame` is a plain keep-alive acknowledgement.
+pub(crate) fn assert_keep_alive_ack(frame: &OfflineFrame) {
+    let v1 = frame.v1.as_ref().unwrap();
+    assert_eq!(v1.r#type(), v1_frame::FrameType::KeepAlive);
+    assert!(v1.keep_alive.as_ref().unwrap().ack());
+}
+
 #[derive(Default)]
 pub(crate) struct FakeLink {
+    /// `host` advertises a forwarder in front of the real port that records the traffic.
+    pub tap: Option<Tap>,
     pub host_fails: bool,
     /// `host` answers like a link that serves another session already.
     pub host_busy: bool,
@@ -175,6 +235,10 @@ impl WifiLink for FakeLink {
             if self.host_fails {
                 return Err(io::Error::other("no hotspot"));
             }
+            let port = match &self.tap {
+                Some(tap) => spawn_tap(port, tap.clone()).await,
+                None => port,
+            };
             Ok(WifiCredentials {
                 ssid: "loopback".into(),
                 password: "password123".into(),
@@ -204,6 +268,51 @@ impl WifiLink for FakeLink {
 
 const LO: Ipv4Addr = Ipv4Addr::LOCALHOST;
 
+/// Forwards one connection to `target` and records both directions; returns the listen port.
+async fn spawn_tap(target: u16, tap: Tap) -> u16 {
+    async fn pump(mut from: OwnedReadHalf, mut to: OwnedWriteHalf, tap: Tap, up: bool) {
+        let mut buf = vec![0u8; 64 * 1024];
+        while let Ok(n) = from.read(&mut buf).await {
+            if n == 0 {
+                break;
+            }
+            {
+                let mut t = tap.lock().unwrap();
+                let side = if up { &mut t.0 } else { &mut t.1 };
+                side.extend_from_slice(&buf[..n]);
+            }
+            if to.write_all(&buf[..n]).await.is_err() {
+                break;
+            }
+        }
+        let _ = to.shutdown().await;
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        let (a, _) = listener.accept().await.unwrap();
+        let b = TcpStream::connect(("127.0.0.1", target)).await.unwrap();
+        let (ar, aw) = a.into_split();
+        let (br, bw) = b.into_split();
+        tokio::join!(
+            pump(ar, bw, tap.clone(), true),
+            pump(br, aw, tap.clone(), false)
+        );
+    });
+    port
+}
+
+/// Splits `[4-byte BE length][frame]` records; panics on a truncated tail.
+fn split_frames(mut data: &[u8]) -> Vec<&[u8]> {
+    let mut frames = Vec::new();
+    while !data.is_empty() {
+        let len = u32::from_be_bytes(data[..4].try_into().unwrap()) as usize;
+        frames.push(&data[4..4 + len]);
+        data = &data[4 + len..];
+    }
+    frames
+}
+
 async fn bound() -> (TcpListener, u16) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -216,13 +325,14 @@ fn client(port: u16, endpoint: &'static str) -> JoinHandle<anyhow::Result<TcpStr
         LO,
         endpoint,
         true,
+        false,
     ))
 }
 
 #[tokio::test]
 async fn introduction_over_loopback_ignores_strangers() {
     let (listener, port) = bound().await;
-    let server = tokio::spawn(accept_introduced(listener, "WXYZ".into(), LO));
+    let server = tokio::spawn(accept_introduced(listener, "WXYZ".into(), LO, false));
 
     // Junk must not consume the upgrade.
     let mut junk = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
@@ -245,12 +355,27 @@ async fn introduction_over_loopback_ignores_strangers() {
 }
 
 #[tokio::test]
+async fn the_host_keeps_its_own_encryption_choice_when_the_client_differs() {
+    for offered in [true, false] {
+        let (listener, port) = bound().await;
+        let server = tokio::spawn(accept_introduced(listener, "WXYZ".into(), LO, offered));
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        write_plain_frame(&mut stream, &client_introduction_frame("WXYZ", !offered))
+            .await
+            .unwrap();
+        // Accepted anyway; the caller keeps what it offered.
+        assert!(server.await.unwrap().is_ok());
+    }
+}
+
+#[tokio::test]
 async fn connections_to_another_address_are_ignored() {
     let (listener, port) = bound().await;
     let server = tokio::spawn(accept_introduced(
         listener,
         "WXYZ".into(),
         Ipv4Addr::new(192, 168, 49, 1),
+        false,
     ));
     let _client = client(port, "WXYZ");
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -260,7 +385,7 @@ async fn connections_to_another_address_are_ignored() {
 #[tokio::test]
 async fn a_silent_connection_does_not_delay_the_peer() {
     let (listener, port) = bound().await;
-    let server = tokio::spawn(accept_introduced(listener, "WXYZ".into(), LO));
+    let server = tokio::spawn(accept_introduced(listener, "WXYZ".into(), LO, false));
     let _silent = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -323,6 +448,61 @@ fn offers_with_implausible_credentials_are_rejected() {
     assert!(!gateway_is_acceptable(Ipv4Addr::LOCALHOST, false));
     assert!(gateway_is_acceptable(Ipv4Addr::new(10, 0, 0, 1), false));
     assert!(gateway_is_acceptable(Ipv4Addr::new(169, 254, 1, 1), false));
+}
+
+fn direct_info() -> UpgradePathInfo {
+    UpgradePathInfo {
+        medium: Some(Medium::WifiDirect.into()),
+        wifi_direct_credentials: Some(WifiDirectCredentials {
+            ssid: Some("DIRECT-ab".into()),
+            password: Some("secret123".into()),
+            port: Some(40000),
+            frequency: Some(5220),
+            gateway: Some("192.168.49.1".into()),
+        }),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn wifi_direct_offers_map_to_the_same_credentials() {
+    let c = info_to_credentials(&direct_info()).unwrap();
+    assert_eq!(c.ssid, "DIRECT-ab");
+    assert_eq!(c.password, "secret123");
+    assert_eq!((c.port, c.frequency_mhz), (40000, 5220));
+    assert_eq!(c.gateway, Ipv4Addr::new(192, 168, 49, 1));
+
+    let mut info = direct_info();
+    info.wifi_direct_credentials.as_mut().unwrap().frequency = Some(-1);
+    assert_eq!(info_to_credentials(&info).unwrap().frequency_mhz, 0);
+}
+
+#[test]
+fn implausible_wifi_direct_offers_are_rejected() {
+    let reject = |edit: &dyn Fn(&mut WifiDirectCredentials)| {
+        let mut info = direct_info();
+        edit(info.wifi_direct_credentials.as_mut().unwrap());
+        assert!(info_to_credentials(&info).is_err());
+    };
+    reject(&|c| c.ssid = Some(String::new()));
+    reject(&|c| c.ssid = Some("x".repeat(33)));
+    reject(&|c| c.ssid = Some("-oProxyCommand".into()));
+    reject(&|c| c.password = Some("short".into()));
+    reject(&|c| c.password = Some("p".repeat(64)));
+    reject(&|c| c.gateway = Some("8.8.8.8".into()));
+    reject(&|c| c.gateway = Some("0.0.0.0".into()));
+    reject(&|c| c.gateway = None);
+    reject(&|c| c.port = Some(0));
+    reject(&|c| c.port = Some(70000));
+    reject(&|c| c.port = None);
+
+    let mut info = direct_info();
+    info.wifi_direct_credentials = None;
+    assert!(info_to_credentials(&info).is_err());
+    // Credentials of the wrong kind do not count.
+    let mut info = direct_info();
+    info.medium = Some(Medium::WifiHotspot.into());
+    assert!(info_to_credentials(&info).is_err());
 }
 
 #[test]
@@ -589,7 +769,12 @@ async fn failed_join_falls_back_to_the_first_channel() {
 /// Sends a file from an `OutboundRequest` to an `InboundRequest` whose first channel is a
 /// duplex stream (through a byte counter), then returns the bytes that crossed the duplex
 /// (sender to receiver, receiver to sender), the source and the received file.
-async fn try_duplex_transfer(link: Option<Arc<FakeLink>>, size: usize) -> Option<Outcome> {
+/// With `plain` the receiver offers to disable encryption on the upgraded channel.
+async fn try_duplex_transfer(
+    link: Option<Arc<FakeLink>>,
+    size: usize,
+    plain: bool,
+) -> Option<Outcome> {
     let _guard = SERIAL.lock().await;
     let dyn_link: Option<Arc<dyn WifiLink>> = link.map(|l| l as Arc<dyn WifiLink>);
     *crate::WIFI_LINK.write().unwrap() = dyn_link;
@@ -629,11 +814,14 @@ async fn try_duplex_transfer(link: Option<Arc<FakeLink>>, size: usize) -> Option
     tokio::spawn(pump(b_r, a_w, to_tx_count.clone()));
 
     let (rx_bus, mut rx_events) = broadcast::channel::<ChannelMessage>(256);
-    let inbound = InboundRequest::new_over(
+    let mut inbound = InboundRequest::new_over(
         MigratableStream::Duplex(rx_end),
         "ble-rx".into(),
         rx_bus.clone(),
     );
+    if plain {
+        inbound.offer_disabling_encryption();
+    }
     // Like the TCP server, so that an aborted handshake is reported and the test retries.
     let rx_task = tokio::spawn(crate::manager::drive_inbound(inbound, rx_bus.clone()));
 
@@ -695,9 +883,9 @@ async fn try_duplex_transfer(link: Option<Arc<FakeLink>>, size: usize) -> Option
     finished.then_some((seen, data, received))
 }
 
-async fn duplex_transfer(link: Option<Arc<FakeLink>>, size: usize) -> Outcome {
+async fn duplex_transfer(link: Option<Arc<FakeLink>>, size: usize, plain: bool) -> Outcome {
     for _ in 0..5 {
-        if let Some(outcome) = try_duplex_transfer(link.clone(), size).await {
+        if let Some(outcome) = try_duplex_transfer(link.clone(), size, plain).await {
             return outcome;
         }
     }
@@ -707,7 +895,7 @@ async fn duplex_transfer(link: Option<Arc<FakeLink>>, size: usize) -> Outcome {
 #[tokio::test(flavor = "multi_thread")]
 async fn session_over_a_duplex_stream_without_a_link() {
     let size = 100 * 1024;
-    let ((to_rx, _), sent, received) = duplex_transfer(None, size).await;
+    let ((to_rx, _), sent, received) = duplex_transfer(None, size, false).await;
     assert_eq!(sent, received);
     assert!(to_rx >= size as u64);
 }
@@ -715,7 +903,8 @@ async fn session_over_a_duplex_stream_without_a_link() {
 #[tokio::test(flavor = "multi_thread")]
 async fn duplex_session_upgrades_to_tcp_and_delivers_the_file() {
     let link = Arc::new(FakeLink::default());
-    let ((to_rx, to_tx), sent, received) = duplex_transfer(Some(link.clone()), FILE_SIZE).await;
+    let ((to_rx, to_tx), sent, received) =
+        duplex_transfer(Some(link.clone()), FILE_SIZE, false).await;
     assert_eq!(sent, received);
     assert_eq!(link.hosts.load(Ordering::SeqCst), 1);
     assert_eq!(link.joins.load(Ordering::SeqCst), 1);
@@ -724,4 +913,64 @@ async fn duplex_session_upgrades_to_tcp_and_delivers_the_file() {
         "{to_rx} bytes on the duplex"
     );
     assert!(to_tx < 64 * 1024, "{to_tx} bytes back on the duplex");
+}
+
+fn decode_plain(frames: &[&[u8]]) -> Vec<OfflineFrame> {
+    frames
+        .iter()
+        .map(|f| {
+            let frame = OfflineFrame::decode(*f).expect("not an OfflineFrame");
+            assert!(frame.v1.is_some(), "not an OfflineFrame");
+            frame
+        })
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn duplex_session_upgrades_to_plain_frames_and_delivers_the_file() {
+    let tap = Tap::default();
+    let link = Arc::new(FakeLink {
+        tap: Some(tap.clone()),
+        ..Default::default()
+    });
+    let ((to_rx, to_tx), sent, received) =
+        duplex_transfer(Some(link.clone()), FILE_SIZE, true).await;
+    assert_eq!(sent, received);
+    assert_eq!(link.hosts.load(Ordering::SeqCst), 1);
+    assert_eq!(link.joins.load(Ordering::SeqCst), 1);
+    assert!(
+        to_rx < (FILE_SIZE / 4) as u64,
+        "{to_rx} bytes on the duplex"
+    );
+    assert!(to_tx < 64 * 1024, "{to_tx} bytes back on the duplex");
+
+    // The upgraded channel carries bare OfflineFrames, no SecureMessage.
+    let (up, down) = tap.lock().unwrap().clone();
+    let up = decode_plain(&split_frames(&up));
+    let down = decode_plain(&split_frames(&down));
+    let intro = parse_bwu(&up[0])
+        .unwrap()
+        .client_introduction
+        .as_ref()
+        .unwrap();
+    assert_eq!(intro.supports_disabling_encryption, Some(true));
+    assert_eq!(
+        parse_bwu(&down[0]).unwrap().event_type(),
+        EventType::ClientIntroductionAck
+    );
+    let body: usize = up[1..]
+        .iter()
+        .filter_map(|f| {
+            f.v1.as_ref()?
+                .payload_transfer
+                .as_ref()?
+                .payload_chunk
+                .as_ref()
+        })
+        .map(|c| c.body.as_ref().map_or(0, Vec::len))
+        .sum();
+    assert!(
+        body >= FILE_SIZE,
+        "only {body} payload bytes in plain frames"
+    );
 }

@@ -12,8 +12,28 @@ TransferJob::TransferJob(const QString &id, bool outbound, const QString &device
 
 void TransferJob::start()
 {
+    emitDescription();
+}
+
+void TransferJob::setConnecting(bool connecting)
+{
+    if (m_connecting == connecting)
+    {
+        return;
+    }
+    m_connecting = connecting;
+    setCapabilities(connecting ? KJob::NoCapabilities : KJob::Killable);
+    if (!connecting)
+    {
+        emitDescription();
+    }
+}
+
+void TransferJob::emitDescription()
+{
     Q_EMIT description(this,
-                       m_outbound ? i18n("Sending files") : i18n("Receiving files"),
+                       m_connecting ? i18n("Connecting…") : m_outbound ? i18n("Sending files")
+                                                                        : i18n("Receiving files"),
                        qMakePair(m_outbound ? i18n("To") : i18n("From"), m_device),
                        m_summary.isEmpty() ? QPair<QString, QString>() : qMakePair(i18n("Files"), m_summary));
 }

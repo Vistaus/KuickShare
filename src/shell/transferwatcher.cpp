@@ -30,6 +30,39 @@ TransferWatcher::TransferWatcher(CoreBridge *core, QObject *parent)
 {
     m_clock.start();
     connect(core, &CoreBridge::transferChanged, this, &TransferWatcher::onTransferChanged);
+    connect(core, &CoreBridge::sendRequested, this, &TransferWatcher::onSendRequested);
+    connect(core, &CoreBridge::sendRefused, this, &TransferWatcher::onSendRefused);
+}
+
+void TransferWatcher::onSendRequested(const QString &id, const QString &device, int files)
+{
+    Tracked &tracked = m_tracked[id];
+    if (tracked.finished)
+    {
+        tracked = Tracked(); // the same id starts a new transfer
+    }
+    if (tracked.job)
+    {
+        return;
+    }
+    // Show the job right away: finding the device and connecting can take several seconds.
+    auto *job = new TransferJob(id, true, device, this);
+    connect(job, &TransferJob::cancelRequested, m_core, &CoreBridge::cancel);
+    job->setSummary(i18np("%1 file", "%1 files", files));
+    job->setConnecting(true);
+    m_tracker.registerJob(job);
+    job->start();
+    tracked.job = job;
+}
+
+void TransferWatcher::onSendRefused(const QString &id)
+{
+    Tracked &tracked = m_tracked[id];
+    if (tracked.job && !tracked.started)
+    {
+        tracked.job->finish(false, true);
+    }
+    tracked.finished = true;
 }
 
 void TransferWatcher::onTransferChanged(const QString &id)
@@ -74,7 +107,11 @@ void TransferWatcher::onTransferChanged(const QString &id)
     }
     if (isTransferring(state) && total > 0 && preview.isEmpty())
     {
-        if (!tracked.job)
+        if (tracked.job)
+        {
+            tracked.job->setConnecting(false);
+        }
+        else
         {
             auto *job = new TransferJob(id, outbound, device, this);
             connect(job, &TransferJob::cancelRequested, m_core, &CoreBridge::cancel);
@@ -114,7 +151,8 @@ void TransferWatcher::onTransferChanged(const QString &id)
     // A received file gets its own "Files received" notification: close the job without a second one.
     if (tracked.job)
     {
-        tracked.job->finish(success, success && !outbound && preview.isEmpty());
+        // Nothing moved yet: the job only said "Connecting", the failure notification follows.
+        tracked.job->finish(success, (success && !outbound && preview.isEmpty()) || !tracked.started);
     }
 
     const QString who = device.isEmpty() ? i18n("a nearby device") : device;
@@ -126,7 +164,10 @@ void TransferWatcher::onTransferChanged(const QString &id)
     {
         // The library reports a refusal by the other device as "Disconnected"; before any data
         // moved that is the most likely reason (it can also be a full disk or a timeout).
-        notifyProblem(QStringLiteral("transferFailed"), i18n("Transfer not accepted"), i18n("%1 declined the transfer or could not receive it", who.toHtmlEscaped()));
+        const QString reason = id.startsWith(QLatin1String("ble:"))
+                                   ? i18n("%1 declined the transfer, could not receive it or was not reachable over Bluetooth", who.toHtmlEscaped())
+                                   : i18n("%1 declined the transfer or could not receive it", who.toHtmlEscaped());
+        notifyProblem(QStringLiteral("transferFailed"), i18n("Transfer not accepted"), reason);
     }
     else if (state == QLatin1String("Disconnected"))
     {

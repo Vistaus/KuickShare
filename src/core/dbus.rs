@@ -73,6 +73,12 @@ impl Service {
         self.core.lock().await.start_discovery().map_err(failed)
     }
 
+    /// Looks for nearby phones over Bluetooth once more (a few seconds); needs the Wi-Fi upgrade
+    /// and a Bluetooth adapter, otherwise it silently finds nothing.
+    async fn scan_bluetooth(&self) -> fdo::Result<()> {
+        self.core.lock().await.scan_bluetooth().map_err(failed)
+    }
+
     async fn stop_discovery(&self) {
         self.core.lock().await.stop_discovery();
     }
@@ -311,7 +317,7 @@ impl Service {
         info: HashMap<&str, Variant<'_>>,
     ) -> zbus::Result<()>;
 
-    /// `info` keys: name, ip, port, device_type, trust (strings; trust is "", "kuickshare" or "trusted").
+    /// `info` keys: name, ip, port, device_type, trust, medium (strings; trust is "", "kuickshare" or "trusted"; medium is "lan" or "ble").
     #[zbus(signal)]
     async fn device_found(
         emitter: &SignalEmitter<'_>,
@@ -757,6 +763,10 @@ fn device_info(endpoint: &EndpointInfo, trust: &str) -> HashMap<&'static str, Va
         ),
         ("device_type", Variant::from(device_type)),
         ("trust", Variant::from(trust.to_owned())),
+        (
+            "medium",
+            Variant::from(endpoint.ble.map_or("lan", |_| "ble")),
+        ),
     ])
 }
 
@@ -776,8 +786,8 @@ async fn forward_devices(
             Err(broadcast::error::RecvError::Closed) => return,
         };
 
-        // Discovery reports a vanished device as an endpoint with only its id set.
-        if endpoint.present.is_some() {
+        // A vanished device is an endpoint with only its id set (mDNS) or `present` false (Bluetooth).
+        if endpoint.present == Some(true) {
             presence.lock().unwrap().seen(&endpoint.id);
             endpoints
                 .lock()
@@ -908,6 +918,25 @@ pub async fn forward_trust_events(
     }
 }
 
+/// Reports a transfer that never started as failed (`Disconnected`), without a history entry.
+pub async fn emit_failed_transfer(connection: &Connection, id: &str, device: &str) {
+    let event = TransferEvent {
+        id: id.to_owned(),
+        kind: "outbound",
+        state: format!("{:?}", TransferState::Disconnected),
+        device: device.to_owned(),
+        last_event: history::now(),
+        ..TransferEvent::default()
+    };
+    let emitted = async {
+        let iface = interface_ref(connection).await?;
+        Service::transfer_updated(iface.signal_emitter(), &event.id, event.info()).await
+    };
+    if let Err(e) = emitted.await {
+        tracing::warn!("failed to emit TransferUpdated: {e}");
+    }
+}
+
 async fn expire_device(
     connection: Connection,
     id: String,
@@ -937,6 +966,48 @@ mod tests {
     };
 
     use super::*;
+
+    fn ble_endpoint(present: bool) -> EndpointInfo {
+        EndpointInfo {
+            fullname: "ble:G483._ble".into(),
+            id: "ble:G483".into(),
+            name: Some("Pixel".into()),
+            present: Some(present),
+            ble: Some(rqs_lib::BleTarget {
+                endpoint_id: *b"G483",
+            }),
+            ..EndpointInfo::default()
+        }
+    }
+
+    fn text(info: &HashMap<&'static str, Variant<'static>>, key: &str) -> String {
+        String::try_from(info[key].clone()).unwrap()
+    }
+
+    #[test]
+    fn ble_device_has_the_ble_medium_and_no_address() {
+        let info = device_info(&ble_endpoint(true), "");
+        assert_eq!(text(&info, "medium"), "ble");
+        assert_eq!(text(&info, "name"), "Pixel");
+        assert_eq!(
+            (text(&info, "ip"), text(&info, "port")),
+            (String::new(), String::new())
+        );
+    }
+
+    #[test]
+    fn lan_device_has_the_lan_medium() {
+        let lan = EndpointInfo {
+            id: "10.0.0.2:4000".into(),
+            ip: Some("10.0.0.2".into()),
+            port: Some("4000".into()),
+            present: Some(true),
+            ..EndpointInfo::default()
+        };
+        let info = device_info(&lan, "kuickshare");
+        assert_eq!(text(&info, "medium"), "lan");
+        assert_eq!(text(&info, "ip"), "10.0.0.2");
+    }
 
     #[test]
     fn event_without_metadata_has_empty_fields() {

@@ -50,7 +50,15 @@ The private bus isolates D-Bus and files only: the daemon still advertises on th
 
 ## Methods
 
-IDs: a transfer `id` and a device `id` are both `ip:port` strings taken from `TransferUpdated` and `DeviceFound`.
+IDs: a transfer `id` and a device `id` are both taken from `TransferUpdated` and `DeviceFound`.
+
+| Id | Meaning |
+|---|---|
+| `ip:port` | A device on the network, or a transfer with it |
+| `ble:<endpoint id>` (e.g. `ble:G483`) | A phone found over Bluetooth LE (`medium` `ble`); an outgoing transfer to it has the same id. Hex (`ble:0001ff41`) when the 4-byte endpoint id is not printable |
+| `ble-<N>` | An incoming Bluetooth transfer; never a device id |
+
+Bluetooth devices are listed only while `WifiUpgrade` is on, can be sent to but not paired with.
 
 | Method | Signature | Description | Errors |
 |---|---|---|---|
@@ -58,15 +66,16 @@ IDs: a transfer `id` and a device `id` are both `ip:port` strings taken from `Tr
 | `Decline` | `(s id)` | Decline it | same |
 | `Cancel` | `(s id)` | Cancel a running transfer, either direction | same |
 | `StartDiscovery` | `()` | Start looking for nearby devices; reported by `DeviceFound` / `DeviceLost`. Does nothing if already on | Service not running |
+| `ScanBluetooth` | `()` | Run one more Bluetooth LE scan window (a few seconds) for phones in Receive mode; results arrive as `DeviceFound`. Does nothing without `WifiUpgrade`, a Bluetooth adapter, while a scan or Bluetooth send runs, or within 4 seconds of the previous window | Service not running; discovery is not running |
 | `StopDiscovery` | `()` | Stop looking and forget the devices found so far, so sending to one needs a new `StartDiscovery` | none |
-| `SendFiles` | `(s device_id, as paths)` | Send files to a discovered device | Empty list; a path that cannot be read; unknown device; service stopped |
-| `SendText` | `(s device_id, s text, s kind)` | Send text. `kind` `"url"` sends a link, any other value sends plain text | Blank text; unknown device; service stopped |
+| `SendFiles` | `(s device_id, as paths)` | Send files to a discovered device. A Bluetooth device is scanned for again first (up to 12 seconds) | Empty list; a path that cannot be read; unknown device; Bluetooth device while `WifiUpgrade` is off; service stopped |
+| `SendText` | `(s device_id, s text, s kind)` | Send text. `kind` `"url"` sends a link, any other value sends plain text | Blank text; unknown device; Bluetooth device while `WifiUpgrade` is off; service stopped |
 | `History` | `() -> s` | Finished transfers, newest first, JSON (see [History](#history)). Applies the retention first | none |
 | `HistorySize` | `() -> t` | Size of the history file in bytes (0 if never written) | none |
 | `RemoveHistory` | `(t uid)` | Delete one entry; an unknown `uid` is ignored | none |
 | `ClearHistory` | `()` | Delete all entries | none |
 | `SetPairing` | `(b open)` | Let other KuickShare computers start a pairing with this one. `true` opens a 5 minute window, `false` closes it | none |
-| `PairWith` | `(s device_id)` | Start pairing with a discovered computer; progress arrives as `PairingCode` / `PairingFinished` | Unknown device |
+| `PairWith` | `(s device_id)` | Start pairing with a discovered computer; progress arrives as `PairingCode` / `PairingFinished` | Unknown device; a `ble:` id |
 | `ConfirmPairing` | `(b accept)` | Answer to `PairingCode`: do both screens show the same code? Ignored if no pairing waits | none |
 | `Unpair` | `(s fingerprint)` | Forget a paired computer; emits `TrustedChanged` even if the fingerprint is unknown | none |
 | `TrustedDevices` | `() -> s` | Paired computers, JSON (see [Paired computers](#paired-computers)) | none |
@@ -104,7 +113,7 @@ Whether `PropertiesChanged` is emitted for changes made by `ResetSettings` was n
 |---|---|---|
 | `TransferUpdated` | `(s id, a{sv} info)` | Every event of a transfer, in both directions; see [TransferUpdated](#transferupdated) |
 | `DeviceFound` | `(s id, a{sv} info)` | A device is announced or announced again, and once more when the KuickShare check finishes; see [DeviceFound](#devicefound) |
-| `DeviceLost` | `(s id)` | A device has not been seen for 4 seconds after it disappeared. Android changes its announced name every few seconds, so this grace period hides the lost/found flicker |
+| `DeviceLost` | `(s id)` | A device has not been seen for 4 seconds after it disappeared (for Bluetooth: after a scan window no longer saw it). Android changes its announced name every few seconds, so this grace period hides the lost/found flicker |
 | `PairingCode` | `(s code, s peer)` | A pairing needs confirmation. `code` is 8 digits formatted `1234 5678`, derived from the handshake; compare it with the other screen, then call `ConfirmPairing` |
 | `PairingFinished` | `(b ok, s peer, s message)` | A pairing ended. `message` is empty on success |
 | `TrustedChanged` | `()` | The paired computers list changed (pairing completed or `Unpair`) |
@@ -133,14 +142,15 @@ A restart of sharing (name, port, reset) forgets the discovered devices without 
 
 ### DeviceFound
 
-`info` has 5 string keys. The same device is usually reported twice: first as announced, then again after the core has checked whether it runs KuickShare.
+`info` has 6 string keys. The same device is usually reported twice: first as announced, then again after the core has checked whether it runs KuickShare.
 
 | Key | Meaning |
 |---|---|
 | `name` | Advertised name |
-| `ip` | Address |
-| `port` | Quick Share port |
+| `ip` | Address; empty for Bluetooth |
+| `port` | Quick Share port; empty for Bluetooth |
 | `device_type` | `Unknown`, `Phone`, `Tablet` or `Laptop`; empty if not announced |
+| `medium` | `lan` (mDNS) or `ble` (Bluetooth LE) |
 | `trust` | `""` other device, `kuickshare` runs KuickShare, `trusted` paired with this computer (both sides). Only addresses on the local network (private, link-local, loopback, IPv6 ULA) are checked, each at most once every 20 seconds |
 
 ## Transfer states
@@ -156,6 +166,8 @@ A restart of sharing (name, port, reset) forgets the discovered devices without 
 | `WaitingForUserConsent` | no | Inbound transfer waits for `Accept` or `Decline` |
 | `ReceivingFiles`, `SendingFiles` | no | Data is moving |
 | `Initial`, `ReceivedConnectionRequest`, `SentUkeyServerInit`, `SentUkeyClientInit`, `SentUkeyClientFinish`, `SentPairedKeyEncryption`, `ReceivedUkeyClientFinish`, `SentConnectionResponse`, `SentPairedKeyResult`, `SentIntroduction`, `ReceivedPairedKeyResult` | no | Handshake steps of the protocol |
+
+A Bluetooth send whose scan or dial fails produces no event from the library: after 25 seconds without one the core emits `Disconnected` for that id (outbound, no history entry).
 
 Only the first final state of a transfer is recorded in the history. `Finished` can be followed by `Disconnected`; that second event has `history_uid` 0.
 
@@ -264,4 +276,4 @@ Pairing and paired-computer checks use a separate TCP port, 47891 (fixed), Noise
 - history retention removes old entries from the answer and from the file; `HistorySize`, `RemoveHistory` and `ClearHistory` work; entries without `uid` get one
 - `AllowDevice` fails for an unknown transfer and `ForgetAllowed` accepts an unknown entry
 
-Transfers, discovery and pairing are not exercised through D-Bus by these tests; pairing has loopback tests in `src/core/trust.rs`.
+`ScanBluetooth` and the refusal of `ble:` ids for pairing and sending are checked, but the tests cannot do Bluetooth. Transfers, discovery and pairing are not exercised through D-Bus by these tests; pairing has loopback tests in `src/core/trust.rs`.

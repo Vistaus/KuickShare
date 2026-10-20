@@ -26,6 +26,7 @@ I would love to use KDE Connect, but unfortunately its data transfer feature has
 ## Features
 
 - Send and receive files, text and links with phones and other Quick Share devices on the same Wi-Fi network.
+- Experimental, off by default: send to and receive from a phone that shares no network with the computer, over Bluetooth and a temporary Wi-Fi link (see [Wi-Fi upgrade](docs/wifi-direct.md)).
 - Accept or decline incoming transfers from a notification; progress shows in Plasma's job tracker.
 - Drag and drop, clipboard paste and **Send with KuickShare** in Dolphin.
 - History of past transfers, with automatic cleanup.
@@ -34,7 +35,7 @@ I would love to use KDE Connect, but unfortunately its data transfer feature has
 - English and Italian interface.
 
 > [!NOTE]
-> AirDrop cannot be supported. It needs Apple's AWDL Wi-Fi link, which on Linux works only with a few Wi-Fi chips that allow monitor mode and packet injection. Google's AirDrop support in Quick Share on Pixel phones relies on Android-side code and does not change the Quick Share protocol KuickShare speaks. Wi-Fi Direct is possible but not implemented: see the [study](docs/wifi-direct.md).
+> AirDrop cannot be supported. It needs Apple's AWDL Wi-Fi link, which on Linux works only with a few Wi-Fi chips that allow monitor mode and packet injection. Google's AirDrop support in Quick Share on Pixel phones relies on Android-side code and does not change the Quick Share protocol KuickShare speaks. A Wi-Fi link without a shared network is experimental: see [Wi-Fi upgrade](docs/wifi-direct.md).
 
 ## Install
 
@@ -61,7 +62,7 @@ Update, uninstall and requirements are in the [usage guide](docs/usage.md).
 |---|---|
 | [Usage](docs/usage.md) | Install, update, uninstall, everyday use, trusted and paired devices |
 | [Architecture](docs/architecture.md) | Design, security model, packaging |
-| [Wi-Fi Direct](docs/wifi-direct.md) | Feasibility study: prior art, requirements, limits (not implemented) |
+| [Wi-Fi upgrade](docs/wifi-direct.md) | Transfers without a shared network (experimental): how it works, requirements, limits, open work |
 | [D-Bus API](docs/dbus-api.md) | The interface of the background service |
 | [Contributing](CONTRIBUTING.md) | Build, tests, translations, releases |
 | [Security](SECURITY.md) | Reporting a vulnerability, known limits |

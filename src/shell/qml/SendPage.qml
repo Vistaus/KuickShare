@@ -15,7 +15,7 @@ Kirigami.ScrollablePage {
     signal filesAdded(var urls)
     signal fileRemoved(string path)
     signal filesCleared
-    signal sent
+    signal sent(string deviceId)
 
     readonly property var details: files.map(path => core.fileDetails(path))
     readonly property real totalBytes: details.reduce((sum, file) => sum + file.bytes, 0)
@@ -94,7 +94,7 @@ Kirigami.ScrollablePage {
         } else {
             core.sendText(deviceId, trimmedText, singleLink && !sendAsText);
         }
-        sent();
+        sent(deviceId);
     }
 
     // The most files listed in the card; the rest is in the dialog.
@@ -461,6 +461,19 @@ Kirigami.ScrollablePage {
                 level: 3
                 text: i18n("Send to")
             }
+            Item {
+                Layout.fillWidth: true
+            }
+            // Phones in Receive mode are found over Bluetooth by a short scan, not continuously.
+            QQC2.ToolButton {
+                visible: page.core.wifiUpgrade
+                icon.name: "view-refresh-symbolic"
+                text: i18n("Search again")
+                display: QQC2.AbstractButton.IconOnly
+                QQC2.ToolTip.visible: hovered
+                QQC2.ToolTip.text: i18n("Search for nearby phones over Bluetooth again")
+                onClicked: page.core.scanBluetooth()
+            }
         }
 
         // Centered in the space left between the title and the bottom of the window
@@ -510,6 +523,7 @@ Kirigami.ScrollablePage {
                 required property string deviceType
                 required property string address
                 required property string trust
+                required property string medium
 
                 Layout.fillWidth: true
                 enabled: page.hasContent
@@ -541,9 +555,22 @@ Kirigami.ScrollablePage {
                     }
                     Kirigami.Heading {
                         level: 4
-                        text: deviceCard.name.length > 0 ? deviceCard.name : deviceCard.address
+                        text: deviceCard.name.length > 0 ? deviceCard.name : deviceCard.medium === "ble" ? i18n("Bluetooth device") : deviceCard.address
                         elide: Text.ElideRight
                         Layout.fillWidth: true
+                    }
+                    RowLayout {
+                        visible: deviceCard.medium === "ble"
+                        spacing: Kirigami.Units.smallSpacing
+                        Kirigami.Icon {
+                            source: "network-bluetooth"
+                            Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                        }
+                        QQC2.Label {
+                            text: i18n("Bluetooth")
+                            opacity: 0.7
+                        }
                     }
                     RowLayout {
                         visible: deviceCard.trust === "trusted"

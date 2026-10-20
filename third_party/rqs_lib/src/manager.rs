@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::channel::{self, ChannelMessage, MessageClient, TransferKind};
 use crate::errors::AppError;
-use crate::hdl::{InboundRequest, OutboundPayload, OutboundRequest, TransferState};
+use crate::hdl::{BleTarget, InboundRequest, OutboundPayload, OutboundRequest, TransferState};
 use crate::utils::RemoteDeviceInfo;
 
 const INNER_NAME: &str = "TcpServer";
@@ -16,6 +16,13 @@ pub struct SendInfo {
     pub name: String,
     pub addr: String,
     pub ob: OutboundPayload,
+}
+
+impl SendInfo {
+    /// The BLE target when `id` is a `ble:` id (`BleTarget::id`); `addr` is then ignored.
+    pub fn ble_target(&self) -> Option<BleTarget> {
+        BleTarget::parse(&self.id)
+    }
 }
 
 /// Runs an inbound session until it ends; an end before `Finished` is reported on the bus.
@@ -112,6 +119,9 @@ impl TcpServer {
 
     /// To be called inside a separate task if we want to handle concurrency
     pub async fn connect(&self, ctk: CancellationToken, si: SendInfo) -> Result<(), anyhow::Error> {
+        if let Some(target) = si.ble_target() {
+            return self.connect_ble(ctk, si, target).await;
+        }
         debug!("{INNER_NAME}: Connecting to: {}", si.addr);
         let socket = TcpStream::connect(si.addr.clone()).await?;
 
@@ -167,5 +177,100 @@ impl TcpServer {
         }
 
         Ok(())
+    }
+
+    /// Sends over BLE L2CAP: a fresh scan for the phone, a dial, then the same session and bus
+    /// messages as the TCP path, under the transfer id `si.id`.
+    async fn connect_ble(
+        &self,
+        ctk: CancellationToken,
+        si: SendInfo,
+        target: BleTarget,
+    ) -> Result<(), anyhow::Error> {
+        if crate::wifi_link().is_none() {
+            anyhow::bail!(
+                "sending to {} over Bluetooth needs the Wi-Fi upgrade, which is off",
+                si.id
+            );
+        }
+        #[cfg(all(feature = "experimental", target_os = "linux"))]
+        {
+            debug!("{INNER_NAME}: Connecting over BLE to: {}", si.id);
+            crate::hdl::ble_scan::SCANNER
+                .send(
+                    target,
+                    self.endpoint_id,
+                    si.id,
+                    si.name,
+                    si.ob,
+                    self.sender.clone(),
+                    ctk,
+                )
+                .await
+        }
+        #[cfg(not(all(feature = "experimental", target_os = "linux")))]
+        {
+            let _ = (ctk, target);
+            anyhow::bail!("sending over Bluetooth is not supported in this build")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::upgrade::tests::SERIAL;
+
+    fn ble_info(id: &str) -> SendInfo {
+        SendInfo {
+            id: id.into(),
+            name: "Pixel".into(),
+            addr: ":".into(),
+            ob: OutboundPayload::Files(vec![]),
+        }
+    }
+
+    #[test]
+    fn only_ble_ids_are_ble_targets() {
+        assert_eq!(
+            ble_info("ble:G483").ble_target(),
+            Some(BleTarget {
+                endpoint_id: *b"G483"
+            })
+        );
+        assert_eq!(ble_info("10.0.0.2:4000").ble_target(), None);
+    }
+
+    #[tokio::test]
+    async fn a_ble_send_without_a_wifi_link_fails_fast() {
+        let _guard = SERIAL.lock().await;
+        *crate::WIFI_LINK.write().unwrap() = None;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (bus, _rx) = tokio::sync::broadcast::channel(4);
+        let (_tx, unused) = tokio::sync::mpsc::channel(1);
+        let server = TcpServer::new(*b"TEST", listener, bus, unused).unwrap();
+        let err = server
+            .connect(CancellationToken::new(), ble_info("ble:G483"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Wi-Fi upgrade"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_tcp_send_does_not_need_the_link() {
+        let _guard = SERIAL.lock().await;
+        *crate::WIFI_LINK.write().unwrap() = None;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let (bus, _rx) = tokio::sync::broadcast::channel(4);
+        let (_tx, unused) = tokio::sync::mpsc::channel(1);
+        let server = TcpServer::new(*b"TEST", listener, bus, unused).unwrap();
+        let mut si = ble_info("127.0.0.1:1");
+        si.addr = "127.0.0.1:1".into();
+        // Nothing listens there: the failure is a TCP one, not the BLE message.
+        let err = server
+            .connect(CancellationToken::new(), si)
+            .await
+            .unwrap_err();
+        assert!(!err.to_string().contains("Wi-Fi upgrade"), "{err}");
     }
 }

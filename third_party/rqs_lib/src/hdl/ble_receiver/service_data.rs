@@ -13,6 +13,11 @@ pub const DEVICE_TYPE_LAPTOP: u8 = 3;
 pub const MAX_NAME_LEN: usize = 100;
 
 const HEADER: u8 = 0x48;
+const HEADER_FAST: u8 = 0x4a;
+/// Bit of the endpoint info header that is set when the name is hidden.
+const INFO_HIDDEN: u8 = 0x10;
+/// Service data is at most 255 bytes on the air; anything larger is not ours.
+const MAX_PARSE_LEN: usize = 512;
 const DATA_VERSION_PCP: u8 = 0x23;
 const MASK_PSM: u8 = 0x01;
 const MASK_RX_INSTANT: u8 = 0x02;
@@ -97,57 +102,108 @@ impl ReceiverAdvertisement {
         out
     }
 
-    /// Parses an advertisement.
-    #[cfg(test)]
+    /// Parses an advertisement; see [`Self::try_parse`] for the reason of a failure.
     pub fn parse(bytes: &[u8]) -> Option<Self> {
-        let (&header, rest) = bytes.split_first()?;
-        if header != HEADER || rest.get(..3)? != SERVICE_HASH {
-            return None;
+        Self::try_parse(bytes).ok()
+    }
+
+    /// Parses the advertisement of a receiver that is visible to everyone (name in clear).
+    /// The "fast" form (`0x4a`, no name and no PSM) is rejected on purpose.
+    pub fn try_parse(bytes: &[u8]) -> Result<Self, ParseError> {
+        if bytes.len() > MAX_PARSE_LEN {
+            return Err(ParseError::TooLong);
         }
-        let len = u32::from_be_bytes(rest.get(3..7)?.try_into().ok()?) as usize;
-        let data = rest.get(7..7usize.checked_add(len)?)?;
+        let (&header, rest) = bytes.split_first().ok_or(ParseError::Truncated)?;
+        match header {
+            HEADER => {}
+            HEADER_FAST => return Err(ParseError::FastForm),
+            _ => return Err(ParseError::BadHeader),
+        }
+        if slice(rest, 0, 3)? != SERVICE_HASH {
+            return Err(ParseError::BadHeader);
+        }
+        let len = usize::try_from(u32::from_be_bytes(array(rest, 3)?))
+            .map_err(|_| ParseError::TooLong)?;
+        let data = slice(rest, 7, len)?;
         let tail = &rest[7 + len..];
 
-        if *data.first()? != DATA_VERSION_PCP || data.get(1..4)? != SERVICE_HASH {
-            return None;
+        if *data.first().ok_or(ParseError::Truncated)? != DATA_VERSION_PCP
+            || slice(data, 1, 3)? != SERVICE_HASH
+        {
+            return Err(ParseError::BadHeader);
         }
-        let endpoint_id: [u8; 4] = data.get(4..8)?.try_into().ok()?;
-        let info_len = *data.get(8)? as usize;
-        let info = data.get(9..9 + info_len)?;
-        let bt_mac: [u8; 6] = data.get(9 + info_len..15 + info_len)?.try_into().ok()?;
+        let endpoint_id = array(data, 4)?;
+        let info_len = usize::from(*data.get(8).ok_or(ParseError::Truncated)?);
+        let info = slice(data, 9, info_len)?;
+        let bt_mac = array(data, 9 + info_len)?;
 
-        let device_type = (info.first()? >> 1) & 0x7;
-        let identity: [u8; 16] = info.get(1..17)?.try_into().ok()?;
-        let name_len = *info.get(17)? as usize;
-        let name = std::str::from_utf8(info.get(18..18 + name_len)?).ok()?;
+        let info_header = *info.first().ok_or(ParseError::Truncated)?;
+        if info_header & INFO_HIDDEN != 0 {
+            return Err(ParseError::NotEveryone);
+        }
+        let device_type = (info_header >> 1) & 0x7;
+        let identity = array(info, 1)?;
+        let name_len = usize::from(*info.get(17).ok_or(ParseError::Truncated)?);
+        let name = std::str::from_utf8(slice(info, 18, name_len)?)
+            .map_err(|_| ParseError::BadName)?
+            .to_owned();
 
-        let mask = *tail.get(2)?;
-        let token: [u8; 2] = tail.get(..2)?.try_into().ok()?;
+        let token = array(tail, 0)?;
+        let mask = *tail.get(2).ok_or(ParseError::Truncated)?;
         let mut at = 3;
         let psm = if mask & MASK_PSM != 0 {
             at += 2;
-            Some(u16::from_be_bytes(tail.get(at - 2..at)?.try_into().ok()?))
+            Some(u16::from_be_bytes(array(tail, at - 2)?))
         } else {
             None
         };
         let rx_instant = if mask & MASK_RX_INSTANT != 0 {
-            let len = *tail.get(at)? as usize;
-            Some(tail.get(at + 1..at + 1 + len)?.to_vec())
+            let len = usize::from(*tail.get(at).ok_or(ParseError::Truncated)?);
+            Some(slice(tail, at + 1, len)?.to_vec())
         } else {
             None
         };
 
-        Some(Self {
+        Ok(Self {
             endpoint_id,
             device_type,
             identity,
-            name: name.to_owned(),
+            name,
             bt_mac,
             psm,
             token,
             rx_instant,
         })
     }
+}
+
+/// Why [`ReceiverAdvertisement::try_parse`] rejected its input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseError {
+    /// Longer than any legal service data.
+    TooLong,
+    /// A length field points past the end of the input.
+    Truncated,
+    /// Not a `0x48 | fc9f5e` advertisement.
+    BadHeader,
+    /// The `0x4a` form that carries neither name nor PSM.
+    FastForm,
+    /// The receiver is not visible to everyone: its name is not in clear.
+    NotEveryone,
+    /// The display name is not UTF-8.
+    BadName,
+}
+
+/// `len` bytes of `b` from `from`, or `Truncated`.
+fn slice(b: &[u8], from: usize, len: usize) -> Result<&[u8], ParseError> {
+    let end = from.checked_add(len).ok_or(ParseError::Truncated)?;
+    b.get(from..end).ok_or(ParseError::Truncated)
+}
+
+fn array<const N: usize>(b: &[u8], from: usize) -> Result<[u8; N], ParseError> {
+    slice(b, from, N)?
+        .try_into()
+        .map_err(|_| ParseError::Truncated)
 }
 
 fn truncate_name(name: &str) -> &str {
@@ -263,5 +319,75 @@ mod tests {
             let _ = ReceiverAdvertisement::parse(&CAPTURE[..n]);
         }
         assert_eq!(ReceiverAdvertisement::parse(&CAPTURE[..62]), None);
+    }
+
+    /// A valid advertisement with the given endpoint info header byte.
+    fn with_info_header(hdr: u8) -> Vec<u8> {
+        let mut b = ReceiverAdvertisement::new(*b"ABCD", 1, [7; 16], "Pixel").to_bytes();
+        b[17] = hdr;
+        b
+    }
+
+    #[test]
+    fn rejects_the_fast_form() {
+        let fast = [0x4a, 0x05, 1, 2, 3, 4, 5, 0x62, 0xf1];
+        assert_eq!(
+            ReceiverAdvertisement::try_parse(&fast),
+            Err(ParseError::FastForm)
+        );
+    }
+
+    #[test]
+    fn rejects_receivers_that_hide_the_name() {
+        assert_eq!(
+            ReceiverAdvertisement::try_parse(&with_info_header(0x22)).map(|a| a.name),
+            Ok("Pixel".into())
+        );
+        assert_eq!(
+            ReceiverAdvertisement::try_parse(&with_info_header(0x32)),
+            Err(ParseError::NotEveryone)
+        );
+    }
+
+    #[test]
+    fn every_truncation_of_the_capture_fails_cleanly() {
+        for n in 0..CAPTURE.len() {
+            assert!(
+                ReceiverAdvertisement::try_parse(&CAPTURE[..n]).is_err(),
+                "{n}"
+            );
+        }
+        assert!(ReceiverAdvertisement::try_parse(&CAPTURE).is_ok());
+    }
+
+    #[test]
+    fn garbage_never_panics() {
+        let mut seed = 0x1234_5678_u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 24) as u8
+        };
+        for round in 0..2000 {
+            let mut b: Vec<u8> = (0..round % 140).map(|_| next()).collect();
+            // Make some of them pass the header so that the inner lengths get exercised.
+            if round % 2 == 0 && b.len() > 8 {
+                b[..4].copy_from_slice(&[0x48, 0xfc, 0x9f, 0x5e]);
+                b[4..7].copy_from_slice(&[0, 0, 0]);
+            }
+            let _ = ReceiverAdvertisement::try_parse(&b);
+        }
+        let huge = [0x48, 0xfc, 0x9f, 0x5e, 0xff, 0xff, 0xff, 0xff, 0x23];
+        assert_eq!(
+            ReceiverAdvertisement::try_parse(&huge),
+            Err(ParseError::Truncated)
+        );
+        assert_eq!(
+            ReceiverAdvertisement::try_parse(&[0; 600]),
+            Err(ParseError::TooLong)
+        );
+        assert_eq!(
+            ReceiverAdvertisement::try_parse(&[0x00, 1, 2]),
+            Err(ParseError::BadHeader)
+        );
     }
 }

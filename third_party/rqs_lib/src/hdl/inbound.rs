@@ -57,6 +57,9 @@ pub struct InboundRequest {
     length_filled: usize,
     /// Keep-alives ignored while the handshake waits for the ConnectionResponse.
     keep_alives_ignored: u8,
+    /// Frames are plain `[length][OfflineFrame]` (no SecureMessage): set once the upgrade
+    /// to a channel with disabled encryption completes.
+    plain_frames: bool,
     pub state: InnerState,
     sender: Sender<ChannelMessage>,
     receiver: Receiver<ChannelMessage>,
@@ -78,6 +81,7 @@ impl InboundRequest {
             length_buf: [0; 4],
             length_filled: 0,
             keep_alives_ignored: 0,
+            plain_frames: false,
             state: InnerState {
                 id,
                 server_seq: 0,
@@ -90,6 +94,12 @@ impl InboundRequest {
             receiver,
             upgrade: UpgradeState::new(crate::wifi_link()),
         }
+    }
+
+    /// Offer to disable encryption on the upgraded channel (never done outside tests).
+    #[cfg(test)]
+    pub(crate) fn offer_disabling_encryption(&mut self) {
+        self.upgrade.set_disable_encryption(true);
     }
 
     pub async fn handle(&mut self) -> Result<(), anyhow::Error> {
@@ -240,6 +250,11 @@ impl InboundRequest {
                     false,
                 )
                 .await;
+            }
+            _ if self.plain_frames => {
+                trace!("Handling plain OfflineFrame");
+                let offline = location_nearby_connections::OfflineFrame::decode(&*frame_data)?;
+                self.process_offline_frame(&offline).await?;
             }
             _ => {
                 trace!("Handling SecureMessage frame");
@@ -534,6 +549,10 @@ impl InboundRequest {
         }
 
         let offline = location_nearby_connections::OfflineFrame::decode(d2d_msg.message())?;
+        self.process_offline_frame(&offline).await
+    }
+
+    async fn process_offline_frame(&mut self, offline: &OfflineFrame) -> Result<(), anyhow::Error> {
         let v1_frame = offline
             .v1
             .as_ref()
@@ -783,7 +802,7 @@ impl InboundRequest {
                 self.send_keepalive(true).await?;
             }
             location_nearby_connections::v1_frame::FrameType::BandwidthUpgradeNegotiation => {
-                self.process_bwu_frame(&offline).await?;
+                self.process_bwu_frame(offline).await?;
             }
             _ => {
                 error!("Unhandled offline frame encrypted: {:?}", offline);
@@ -1185,13 +1204,17 @@ impl InboundRequest {
             "upgrade: offering hotspot {:?} ({}:{})",
             creds.ssid, creds.gateway, creds.port
         );
-        self.encrypt_and_send(&upgrade::path_available_frame(&creds))
-            .await?;
+        self.encrypt_and_send(&upgrade::path_available_frame(
+            &creds,
+            self.upgrade.disable_encryption(),
+        ))
+        .await?;
         self.upgrade
             .begin_waiting(tokio::spawn(upgrade::accept_introduced(
                 listener,
                 endpoint_id,
                 creds.gateway,
+                self.upgrade.disable_encryption(),
             )));
         Ok(())
     }
@@ -1288,7 +1311,12 @@ impl InboundRequest {
         // Let the peer read everything before the socket goes away.
         upgrade::close_gracefully(&mut self.socket).await;
         self.socket = MigratableStream::Tcp(new);
-        info!("upgrade: now on the hotspot");
+        self.plain_frames = self.upgrade.disable_encryption();
+        if self.plain_frames {
+            info!("upgrade: now on the hotspot, plain frames");
+        } else {
+            info!("upgrade: now on the hotspot");
+        }
     }
 
     async fn reject_transfer(
@@ -1472,7 +1500,12 @@ impl InboundRequest {
         Ok(())
     }
 
+    /// The one place that chooses the framing: SecureMessage, or plain after an upgrade
+    /// with disabled encryption.
     async fn encrypt_and_send(&mut self, frame: &OfflineFrame) -> Result<(), anyhow::Error> {
+        if self.plain_frames {
+            return self.send_frame(frame.encode_to_vec()).await;
+        }
         let d2d_msg = DeviceToDeviceMessage {
             sequence_number: Some(self.get_server_seq_inc().await),
             message: Some(frame.encode_to_vec()),
@@ -1643,6 +1676,24 @@ mod tests {
             .await
             .expect("handle() was blocked by the pending hotspot");
         assert!(handled.is_err());
+    }
+
+    /// After an upgrade with disabled encryption frames are bare OfflineFrames both ways.
+    #[tokio::test]
+    async fn plain_mode_reads_and_writes_bare_offline_frames() {
+        let (mut peer, ours) = tokio::io::duplex(4096);
+        let (bus, _rx) = tokio::sync::broadcast::channel(8);
+        let mut req = InboundRequest::new_over(MigratableStream::Duplex(ours), "id".into(), bus);
+        req.plain_frames = true;
+        req.state.state = TransferState::SentConnectionResponse;
+
+        crate::upgrade::tests::write_plain_keep_alive(&mut peer).await;
+        tokio::time::timeout(Duration::from_secs(1), req.handle())
+            .await
+            .expect("handle() did not read the plain frame")
+            .unwrap();
+        let reply = upgrade::read_plain_frame(&mut peer).await.unwrap();
+        crate::upgrade::tests::assert_keep_alive_ack(&reply);
     }
 
     /// A length prefix cut in two by a cancelled `handle` must not lose the first bytes.

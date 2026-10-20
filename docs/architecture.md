@@ -69,6 +69,8 @@ flowchart LR
 | `main.rs` | Loads settings, history and trust, serves D-Bus, starts the engine, waits for a signal |
 | `app.rs` | `Core`: owns the `rqs_lib` engine and the settings. Settings that change the device name or port rebuild the engine, and the old values are restored if that fails |
 | `dbus.rs` | The D-Bus interface, plus forwarder tasks that turn library events into signals, run the consent timeout, the name guard and auto-accept |
+| `link.rs` | `NmLink`: the Wi-Fi link of the upgrade over NetworkManager's D-Bus (access point or join); see [Wi-Fi upgrade](wifi-direct.md) |
+| `dhcp.rs` | Minimal DHCP server for the access point |
 | `trust.rs` | Noise XX channel on TCP 47891: probe, announce, pairing |
 | `allowed.rs` | Trusted devices by name and MAC |
 | `safety.rs` | File name guard |
@@ -259,6 +261,9 @@ Assumes the attacker is on the same LAN, or a malicious app runs as the same use
 | Rich-text or HTML injection through a remote name or text | Shell escapes names and text in notifications, labels use plain text | See next section |
 | Leak of Wi-Fi password through the history | Only the network name is kept | None known |
 | Forged "trusted" display on a card | The trust label comes from the core's probe, not from the advert | Depends on the probe being correct |
+| A nearby device uses the Bluetooth receiver (setting on) to read or cut a session | Only the device that opens the session with a valid connection request can write to it; one session at a time, new ones refused while one is live; a transfer still needs the user's consent and is never auto-accepted (ids `ble-N`) | A device can claim the slot in the instant between the phone's subscribe and its first write, and hold it while it keeps writing |
+| A peer's upgrade offer points the computer at a hostile network | SSID and password are validated, the gateway must be a private address, the profile never takes the default route or DNS and is kept in memory | The computer joins a network chosen by the peer |
+| The access point and its DHCP server on the user's radio | Random 32-character key, one client, DHCP started only when the access point is active, profiles deleted afterwards and at start | The firewall zone is `trusted` while it is up; the DHCP port needs privileges that are not designed yet |
 
 ## Display of remote names
 
@@ -280,7 +285,9 @@ Everything below runs in CI (`.github/workflows/ci.yml`) in a `fedora:44` contai
 | --- | --- | --- |
 | Rust unit tests | `#[cfg(test)]` in `src/core/*.rs` | Name guard, rate limiter, ARP parsing and the trusted-sender rule, settings round trip and defaults, history, stale transfer cleanup, event merging, local-address filter, final states, code format. `trust.rs` tests run two real nodes over loopback: pairing, declined pairing, strangers refused, unnamed computer, unpair, per-address and global connection limits |
 | Rust integration | `tests/core/dbus_api.rs` | Starts the real `kuickshared` binary and drives its D-Bus API as the shell does: default settings, persistence, reset, history remove, clear and expiry, legacy entries without an id, trusting an unknown transfer |
-| Qt tests | `tests/shell/`, run by `ctest` | `TransferModel` (merging, final-state handling, history rows), Dolphin menu entry writing, Exec quoting |
+| Qt tests | `tests/shell/`, run by `ctest` | `TransferModel` (merging, final-state handling, history rows), `DeviceModel`, Dolphin menu entry writing, Exec quoting |
+| `rqs_lib` | `cargo test -p rqs_lib` (not part of the root run: it is not a workspace member) | The upgrade hand-over, plain and encrypted, the Bluetooth receiver and sender and the scanner, in memory and over loopback, with a fake `WifiLink` |
+| Hardware | `#[ignore]` tests in `rqs_lib` (`hdl::ble_scan`, `hdl::ble_send::dial`) | Scan, dial and send with a real adapter and phone, run by hand outside the container; see [Wi-Fi upgrade](wifi-direct.md) |
 
 The integration tests never touch the desktop's bus. Each test starts its own `dbus-daemon` on an abstract socket with a generated config (no service activation), and runs the core with `DBUS_SESSION_BUS_ADDRESS`, `HOME`, `XDG_CONFIG_HOME` and `XDG_DATA_HOME` pointing into a temp directory. `dbus-daemon` must be installed.
 

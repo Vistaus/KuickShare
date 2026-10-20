@@ -96,6 +96,8 @@ public:
 
     Q_INVOKABLE void startDiscovery();
     Q_INVOKABLE void stopDiscovery();
+    /// One more Bluetooth scan window while discovery is on.
+    Q_INVOKABLE void scanBluetooth();
     Q_INVOKABLE void sendFiles(const QString &deviceId, const QStringList &paths);
     /// How many files the last send to this device contained (0 if unknown).
     int outgoingFileCount(const QString &deviceId) const { return m_outgoingFileCounts.value(deviceId); }
@@ -163,6 +165,10 @@ Q_SIGNALS:
     /// A request to the core failed; the message is meant for the user.
     void errorOccurred(const QString &message);
     void transferChanged(const QString &id);
+    /// A send of files was requested; the transfer starts later (scan, connection, consent).
+    void sendRequested(const QString &deviceId, const QString &deviceName, int fileCount);
+    /// The core refused the send request before a transfer existed.
+    void sendRefused(const QString &deviceId);
 
 private Q_SLOTS:
     void onTransferUpdated(const QString &id, const QVariantMap &received);
@@ -177,7 +183,7 @@ private Q_SLOTS:
 
 private:
     void call(const QString &method, const QVariantList &args);
-    void callAsync(const QDBusMessage &message, const std::function<void()> &onSuccess = {});
+    void callAsync(const QDBusMessage &message, const std::function<void()> &onSuccess = {}, const std::function<void()> &onError = {});
     void setRemoteProperty(const QString &name, const QVariant &value);
     void refreshProperties();
     void loadHistory();

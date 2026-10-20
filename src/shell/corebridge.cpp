@@ -249,16 +249,19 @@ void CoreBridge::onServiceUnregistered()
     emit connectedChanged();
 }
 
-void CoreBridge::callAsync(const QDBusMessage &message, const std::function<void()> &onSuccess)
+void CoreBridge::callAsync(const QDBusMessage &message, const std::function<void()> &onSuccess, const std::function<void()> &onError)
 {
     auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(message), this);
-    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, onSuccess](QDBusPendingCallWatcher *w)
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, onSuccess, onError](QDBusPendingCallWatcher *w)
             {
         w->deleteLater();
         const QDBusPendingReply<> reply = *w;
         if (reply.isError()) {
             emit errorOccurred(reply.error().message());
             refreshProperties(); // drop any optimistic value the UI is showing
+            if (onError) {
+                onError();
+            }
         } else if (onSuccess) {
             onSuccess();
         } });
@@ -665,6 +668,11 @@ void CoreBridge::startDiscovery()
     }
 }
 
+void CoreBridge::scanBluetooth()
+{
+    call(QStringLiteral("ScanBluetooth"), {});
+}
+
 void CoreBridge::stopDiscovery()
 {
     m_discoveryStopTimer.start();
@@ -680,7 +688,11 @@ void CoreBridge::stopDiscoveryNow()
 void CoreBridge::sendFiles(const QString &deviceId, const QStringList &paths)
 {
     m_outgoingFileCounts.insert(deviceId, paths.size());
-    call(QStringLiteral("SendFiles"), {deviceId, paths});
+    emit sendRequested(deviceId, m_devices.nameOf(deviceId), paths.size());
+    auto msg = methodCall(iface, QStringLiteral("SendFiles"));
+    msg.setArguments({deviceId, paths});
+    callAsync(msg, {}, [this, deviceId]
+              { emit sendRefused(deviceId); });
 }
 
 void CoreBridge::sendText(const QString &deviceId, const QString &text, bool isUrl)
@@ -756,11 +768,16 @@ void CoreBridge::onTransferUpdated(const QString &id, const QVariantMap &receive
 
 void CoreBridge::onDeviceFound(const QString &id, const QVariantMap &info)
 {
+    const QString medium = info.value(QStringLiteral("medium"), QStringLiteral("lan")).toString();
+    const QString address = medium == QLatin1String("ble")
+                                ? QString()
+                                : QStringLiteral("%1:%2").arg(info.value(QStringLiteral("ip")).toString(), info.value(QStringLiteral("port")).toString());
     m_devices.upsert(id,
                      plain(info.value(QStringLiteral("name")).toString()),
                      info.value(QStringLiteral("device_type")).toString(),
-                     QStringLiteral("%1:%2").arg(info.value(QStringLiteral("ip")).toString(), info.value(QStringLiteral("port")).toString()),
-                     info.value(QStringLiteral("trust")).toString());
+                     address,
+                     info.value(QStringLiteral("trust")).toString(),
+                     medium);
 }
 
 void CoreBridge::onDeviceLost(const QString &id)

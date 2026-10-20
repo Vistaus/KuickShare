@@ -44,7 +44,7 @@ public:
     void remove(const QString &id);
     void clearFinished();
     void clearAll();
-    QVariantMap info(const QString &id) const;
+    Q_INVOKABLE QVariantMap info(const QString &id) const;
 
 private:
     struct Entry

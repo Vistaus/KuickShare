@@ -31,7 +31,8 @@ use crate::utils::stream_read_exact;
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// What a peer needs to join the Wi-Fi network (`WifiHotspotCredentials` on the wire).
+/// What a peer needs to join the Wi-Fi network (`WifiHotspotCredentials` or
+/// `WifiDirectCredentials` on the wire).
 /// `Debug` hides the password.
 #[derive(Clone, PartialEq, Eq)]
 pub struct WifiCredentials {
@@ -135,18 +136,27 @@ fn gateway_is_acceptable(ip: Ipv4Addr, allow_loopback: bool) -> bool {
         && !ip.is_unspecified()
 }
 
-/// Reads a WIFI_HOTSPOT offer; any other medium, missing field or implausible value
-/// (it comes from the peer) is an error.
+/// Reads a WIFI_HOTSPOT or WIFI_DIRECT offer; any other medium, missing field or implausible
+/// value (it comes from the peer) is an error.
 pub fn info_to_credentials(info: &UpgradePathInfo) -> anyhow::Result<WifiCredentials> {
-    if info.medium() != Medium::WifiHotspot {
-        bail!("unsupported upgrade medium {:?}", info.medium());
-    }
-    let c = info
-        .wifi_hotspot_credentials
-        .as_ref()
-        .ok_or_else(|| anyhow!("WIFI_HOTSPOT offer without credentials"))?;
-    let port = u16::try_from(c.port()).ok().filter(|p| *p != 0);
-    let ssid = c.ssid();
+    let (ssid, password, port, frequency, gateway) = match info.medium() {
+        Medium::WifiHotspot => {
+            let c = info
+                .wifi_hotspot_credentials
+                .as_ref()
+                .ok_or_else(|| anyhow!("WIFI_HOTSPOT offer without credentials"))?;
+            (c.ssid(), c.password(), c.port(), c.frequency(), c.gateway())
+        }
+        Medium::WifiDirect => {
+            let c = info
+                .wifi_direct_credentials
+                .as_ref()
+                .ok_or_else(|| anyhow!("WIFI_DIRECT offer without credentials"))?;
+            (c.ssid(), c.password(), c.port(), c.frequency(), c.gateway())
+        }
+        other => bail!("unsupported upgrade medium {other:?}"),
+    };
+    let port = u16::try_from(port).ok().filter(|p| *p != 0);
     if ssid.is_empty()
         || ssid.len() > 32
         || ssid.starts_with('-')
@@ -154,30 +164,33 @@ pub fn info_to_credentials(info: &UpgradePathInfo) -> anyhow::Result<WifiCredent
     {
         bail!("bad SSID");
     }
-    if !(8..=63).contains(&c.password().chars().count()) {
+    if !(8..=63).contains(&password.chars().count()) {
         bail!("bad password length");
     }
-    let gateway: Ipv4Addr = c
-        .gateway()
+    let gateway: Ipv4Addr = gateway
         .parse()
-        .with_context(|| format!("bad gateway {:?}", c.gateway()))?;
+        .with_context(|| format!("bad gateway {gateway:?}"))?;
     if !gateway_is_acceptable(gateway, cfg!(test)) {
         bail!("gateway {gateway} is not a LAN address");
     }
     Ok(WifiCredentials {
         ssid: ssid.to_owned(),
-        password: c.password().to_owned(),
-        port: port.ok_or_else(|| anyhow!("bad port {}", c.port()))?,
+        password: password.to_owned(),
+        port: port.ok_or_else(|| anyhow!("bad port"))?,
         // The wire default is -1 (unknown).
-        frequency_mhz: u32::try_from(c.frequency()).unwrap_or(0),
+        frequency_mhz: u32::try_from(frequency).unwrap_or(0),
         gateway,
     })
 }
 
-pub fn path_available_frame(creds: &WifiCredentials) -> OfflineFrame {
+/// With `disable_encryption` the offer declares that the new channel carries plain
+/// OfflineFrames; otherwise the flag is left out of the wire message.
+pub fn path_available_frame(creds: &WifiCredentials, disable_encryption: bool) -> OfflineFrame {
+    let mut info = credentials_to_info(creds);
+    info.supports_disabling_encryption = disable_encryption.then_some(true);
     bwu_offline_frame(BandwidthUpgradeNegotiationFrame {
         event_type: Some(EventType::UpgradePathAvailable.into()),
-        upgrade_path_info: Some(credentials_to_info(creds)),
+        upgrade_path_info: Some(info),
         ..Default::default()
     })
 }
@@ -190,12 +203,13 @@ pub fn upgrade_failure_frame(info: Option<UpgradePathInfo>) -> OfflineFrame {
     })
 }
 
-pub fn client_introduction_frame(endpoint_id: &str) -> OfflineFrame {
+/// `disable_encryption` echoes the offer's `supports_disabling_encryption`.
+pub fn client_introduction_frame(endpoint_id: &str, disable_encryption: bool) -> OfflineFrame {
     bwu_offline_frame(BandwidthUpgradeNegotiationFrame {
         event_type: Some(EventType::ClientIntroduction.into()),
         client_introduction: Some(ClientIntroduction {
             endpoint_id: Some(endpoint_id.to_owned()),
-            supports_disabling_encryption: Some(false),
+            supports_disabling_encryption: Some(disable_encryption),
         }),
         ..Default::default()
     })
@@ -275,11 +289,13 @@ const MAX_PENDING_INTRO: usize = 16;
 
 /// A new connection is the peer only if it reached the advertised address and sends a
 /// plaintext CLIENT_INTRODUCTION carrying the endpoint id from its ConnectionRequest.
+/// A different `supports_disabling_encryption` than we offered is logged; ours wins.
 async fn introduce(
     mut stream: TcpStream,
     peer: SocketAddr,
     endpoint_id: &str,
     gateway: Ipv4Addr,
+    offered_disabling: bool,
 ) -> Option<TcpStream> {
     let reached = stream.local_addr().ok().map(|a| a.ip());
     if !gateway.is_unspecified() && reached != Some(gateway.into()) {
@@ -294,11 +310,17 @@ async fn introduce(
         }
     };
     let intro = parse_bwu(&frame).filter(|b| b.event_type() == EventType::ClientIntroduction);
-    if intro.and_then(|b| b.client_introduction.as_ref()?.endpoint_id.as_deref())
-        != Some(endpoint_id)
-    {
+    let intro = intro.and_then(|b| b.client_introduction.as_ref());
+    if intro.and_then(|i| i.endpoint_id.as_deref()) != Some(endpoint_id) {
         warn!("upgrade: dropping connection from {peer} (not the expected peer)");
         return None;
+    }
+    let stated = intro.is_some_and(|i| i.supports_disabling_encryption());
+    if stated != offered_disabling {
+        warn!(
+            "upgrade: peer {peer} states supports_disabling_encryption={stated}, \
+             we offered {offered_disabling}; using ours"
+        );
     }
     stream.set_nodelay(true).ok()?;
     info!("upgrade: peer {peer} introduced itself");
@@ -313,6 +335,7 @@ pub async fn accept_introduced(
     listener: TcpListener,
     endpoint_id: String,
     gateway: Ipv4Addr,
+    offered_disabling: bool,
 ) -> io::Result<TcpStream> {
     let mut pending = JoinSet::new();
     loop {
@@ -324,7 +347,7 @@ pub async fn accept_introduced(
                     continue;
                 }
                 let endpoint_id = endpoint_id.clone();
-                pending.spawn(async move { introduce(stream, peer, &endpoint_id, gateway).await });
+                pending.spawn(async move { introduce(stream, peer, &endpoint_id, gateway, offered_disabling).await });
             }
             Some(done) = pending.join_next() => {
                 if let Ok(Some(stream)) = done {
@@ -354,6 +377,7 @@ pub async fn connect_introduced(
     bind: Ipv4Addr,
     endpoint_id: &str,
     expect_ack: bool,
+    disable_encryption: bool,
 ) -> anyhow::Result<TcpStream> {
     let socket = TcpSocket::new_v4()?;
     socket.bind(SocketAddr::from((bind, 0)))?;
@@ -362,7 +386,11 @@ pub async fn connect_introduced(
         .context("connect timed out")?
         .with_context(|| format!("connect to {addr}"))?;
     stream.set_nodelay(true)?;
-    write_plain_frame(&mut stream, &client_introduction_frame(endpoint_id)).await?;
+    write_plain_frame(
+        &mut stream,
+        &client_introduction_frame(endpoint_id, disable_encryption),
+    )
+    .await?;
     if expect_ack {
         let ack = timeout(ACK_TIMEOUT, read_plain_frame(&mut stream))
             .await
@@ -466,6 +494,7 @@ pub async fn prepare_join(
     creds: WifiCredentials,
     endpoint_id: String,
     expect_ack: bool,
+    disable_encryption: bool,
 ) -> anyhow::Result<Prepared> {
     let local = timeout(JOIN_TIMEOUT, link.join(&creds))
         .await
@@ -475,6 +504,7 @@ pub async fn prepare_join(
         local,
         &endpoint_id,
         expect_ack,
+        disable_encryption,
     )
     .await?;
     Ok(Prepared::Joined(stream))
@@ -507,6 +537,9 @@ pub struct UpgradeState {
     /// Peer hand-over events that arrived before our own new stream was ready (the peer
     /// can be faster than the background `join`, most of all on a fast first channel).
     early: Handover,
+    /// The new channel carries plain OfflineFrames: what the host offered, which the client
+    /// follows. Off unless the host option is set (tests) or the peer's offer says so.
+    disable_encryption: bool,
 }
 
 impl std::fmt::Debug for UpgradeState {
@@ -530,7 +563,16 @@ impl UpgradeState {
             link_used: false,
             hotspot_allowed: true,
             early: Handover::default(),
+            disable_encryption: false,
         }
+    }
+
+    pub fn set_disable_encryption(&mut self, on: bool) {
+        self.disable_encryption = on;
+    }
+
+    pub fn disable_encryption(&self) -> bool {
+        self.disable_encryption
     }
 
     pub fn enabled(&self) -> bool {
