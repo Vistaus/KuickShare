@@ -95,7 +95,7 @@ Kirigami.ScrollablePage {
     readonly property int maxDetailRows: 5
 
     function showDetails(item) {
-        detailResult = stateText(item.transferState, item.kind, item.ackBytes);
+        detailResult = stateText(item.transferState, item.kind, item.ackBytes, item.viaBluetooth);
         detailSize = item.totalBytes > 0 ? core.formatSize(item.totalBytes) : "";
         detailFiles = item.files.map(path => {
             const name = path.substring(path.lastIndexOf("/") + 1);
@@ -251,14 +251,17 @@ Kirigami.ScrollablePage {
         }
     }
 
-    function stateText(state, kind, ackBytes) {
+    function stateText(state, kind, ackBytes, viaBluetooth) {
         switch (state) {
         case "WaitingForUserConsent":
             return i18n("Waiting for your approval");
         case "ReceivingFiles":
             return i18n("Receiving…");
+        case "SentIntroduction":
+            return kind === "outbound" ? i18n("Waiting for the other device to accept") : i18n("Connecting…");
         case "SendingFiles":
-            return i18n("Sending…");
+            // Over Bluetooth nothing moves until the Wi-Fi link the phone offers is up.
+            return kind === "outbound" && viaBluetooth && ackBytes === 0 ? i18n("Switching to Wi-Fi…") : i18n("Sending…");
         case "Finished":
             return kind === "outbound" ? i18n("Sent") : i18n("Received");
         case "Cancelled":
@@ -439,6 +442,7 @@ Kirigami.ScrollablePage {
                 width: parent.width - Kirigami.Units.largeSpacing * 2
 
                 readonly property string transferId: cell.transferId
+                readonly property bool viaBluetooth: cell.transferId.startsWith("ble:")
                 readonly property string kind: cell.kind
                 readonly property string transferState: cell.transferState
                 readonly property string device: cell.device
@@ -555,7 +559,7 @@ Kirigami.ScrollablePage {
                                 Layout.fillWidth: true
 
                                 QQC2.Label {
-                                    readonly property string status: item.awaitingConsent && item.pin.length > 0 ? i18n("Wants to share with you · PIN %1", item.pin) : item.inProgress ? page.stateText(item.transferState, item.kind, item.ackBytes).replace("…", "") + " · " + page.core.formatSize(item.totalBytes) : page.stateText(item.transferState, item.kind, item.ackBytes)
+                                    readonly property string status: item.awaitingConsent && item.pin.length > 0 ? i18n("Wants to share with you · PIN %1", item.pin) : item.inProgress ? page.stateText(item.transferState, item.kind, item.ackBytes, item.viaBluetooth).replace("…", "") + " · " + page.core.formatSize(item.totalBytes) : page.stateText(item.transferState, item.kind, item.ackBytes, item.viaBluetooth)
                                     readonly property string stamp: page.when(item.time)
                                     text: stamp.length > 0 && !item.active ? status + " · " + stamp : status
                                     opacity: 0.7

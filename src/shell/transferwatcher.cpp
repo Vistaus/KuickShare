@@ -49,7 +49,7 @@ void TransferWatcher::onSendRequested(const QString &id, const QString &device, 
     auto *job = new TransferJob(id, true, device, this);
     connect(job, &TransferJob::cancelRequested, m_core, &CoreBridge::cancel);
     job->setSummary(i18np("%1 file", "%1 files", files));
-    job->setConnecting(true);
+    job->setStatus(id.startsWith(QLatin1String("ble:")) ? i18n("Looking for the device…") : i18n("Connecting…"));
     m_tracker.registerJob(job);
     job->start();
     tracked.job = job;
@@ -100,6 +100,12 @@ void TransferWatcher::onTransferChanged(const QString &id)
         tracked.consent->close();
     }
 
+    // The step a send is in until the files start to move.
+    if (outbound && tracked.job && !tracked.started && !TransferModel::isFinal(state))
+    {
+        tracked.job->setStatus(state == QLatin1String("SentIntroduction") ? i18n("Waiting for the other device to accept") : i18n("Connecting…"));
+    }
+
     // Text and links are tiny: only real file transfers get a progress job.
     if (isTransferring(state))
     {
@@ -109,7 +115,16 @@ void TransferWatcher::onTransferChanged(const QString &id)
     {
         if (tracked.job)
         {
-            tracked.job->setConnecting(false);
+            // Over Bluetooth the phone offers a Wi-Fi link right after it accepted: nothing moves
+            // until it is up, which takes several seconds.
+            if (outbound && acked == 0 && id.startsWith(QLatin1String("ble:")))
+            {
+                tracked.job->setStatus(i18n("Switching to Wi-Fi…"), true);
+            }
+            else
+            {
+                tracked.job->setStatus(QString());
+            }
         }
         else
         {

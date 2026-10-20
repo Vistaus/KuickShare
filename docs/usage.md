@@ -176,16 +176,16 @@ With **Settings → Wi-Fi hotspot → Receive without a shared network** on, a p
 | | Receiving | Sending |
 |---|---|---|
 | Phone | Quick Share open on the share sheet | Quick Share's receive screen open, visibility **Everyone** |
-| Computer | Visible; the setting on | The phone appears with a Bluetooth icon on the Send page. The refresh button next to "Send to" scans again (a scan lasts about 10 s and is never continuous) |
+| Computer | Visible; the setting on | The phone appears with a Bluetooth icon on the Send page. The refresh button next to "Send to" scans again (a scan lasts about 15 s and is never continuous) |
 | Wi-Fi link | This computer starts a hotspot | The phone starts a Wi-Fi Direct group and this computer joins it |
 | Needs | The `dnsmasq` package: NetworkManager runs it to give the phone an address | Nothing extra |
 
-- Needs NetworkManager and Bluetooth, no privileges. A computer with one radio can lose its Wi-Fi connection while the link is up.
+- Needs NetworkManager and Bluetooth, no privileges. With firewalld the computer opens only the port of the transfer. Without it (ufw, nftables or none) the Wi-Fi hotspot is put in a zone that lets the phone reach every service of the computer, so turning the setting on asks you to confirm. A computer with one radio can lose its Wi-Fi connection while the link is up.
 - While the setting is on, this computer is visible over Bluetooth, under its device name, to devices in range. Nothing is sent without your consent.
 - "Accept and trust" is not offered for Bluetooth transfers, and a PIN is shown for each one: compare it with the phone.
 - A phone on the same network as the computer refuses the Wi-Fi upgrade; use the normal path then.
 - Plasma shows "Connection 'kuickshare-ap' activated" for the temporary link. It cannot be hidden per connection, only for all networks in System Settings → Notifications → Network Management.
-- When you press a device on the Send page, a "Connecting…" job appears in Plasma's job tracker at once and becomes the transfer when data starts. When it finishes, the Send page is left empty; after a failure the files and text stay for a new attempt.
+- When you press a device on the Send page, a job appears in Plasma's job tracker at once and names the step: "Looking for the device…", "Connecting…", "Waiting for the other device to accept", then "Switching to Wi-Fi…" until data moves. It can be cancelled only from the last step on. When it finishes, the Send page is left empty; after a failure the files and text stay for a new attempt.
 
 ## Transfers page and history
 

@@ -591,24 +591,30 @@ async fn report_silent_send(
     id: String,
     device: String,
 ) {
+    if send_started(&mut events, &id, BLE_START_TIMEOUT).await {
+        return;
+    }
+    tracing::info!("no answer from {id}: reporting the Bluetooth send as failed");
+    dbus::emit_failed_transfer(&conn, &id, &device).await;
+}
+
+/// True when the transfer `id` produced an event within `within`, or when the service stopped
+/// (then there is nothing to report).
+async fn send_started(
+    events: &mut broadcast::Receiver<ChannelMessage>,
+    id: &str,
+    within: Duration,
+) -> bool {
     let started = async {
         loop {
             match events.recv().await {
                 Ok(message) if message.id == id => return true,
                 Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
-                // The service stopped: nothing to report.
                 Err(broadcast::error::RecvError::Closed) => return true,
             }
         }
     };
-    if tokio::time::timeout(BLE_START_TIMEOUT, started)
-        .await
-        .is_ok()
-    {
-        return;
-    }
-    tracing::info!("no answer from {id}: reporting the Bluetooth send as failed");
-    dbus::emit_failed_transfer(&conn, &id, &device).await;
+    tokio::time::timeout(within, started).await.is_ok()
 }
 
 /// A transfer that has not been heard of for this long is taken to be over (its final event was
@@ -670,5 +676,44 @@ mod tests {
         let mut left: Vec<_> = active.keys().cloned().collect();
         left.sort();
         assert_eq!(left, ["quiet but alive", "recent"]);
+    }
+
+    fn message(id: &str) -> ChannelMessage {
+        ChannelMessage {
+            id: id.to_owned(),
+            msg: rqs_lib::channel::Message::Lib {
+                action: rqs_lib::channel::TransferAction::TransferCancel,
+            },
+        }
+    }
+
+    const SHORT: Duration = Duration::from_millis(60);
+
+    #[tokio::test]
+    async fn a_send_has_started_when_its_own_first_event_arrives() {
+        let (tx, mut rx) = broadcast::channel(8);
+        tx.send(message("other")).unwrap();
+        tx.send(message("ble:A")).unwrap();
+        assert!(send_started(&mut rx, "ble:A", SHORT).await);
+    }
+
+    #[tokio::test]
+    async fn events_of_other_transfers_do_not_count_as_a_start() {
+        let (tx, mut rx) = broadcast::channel(8);
+        tx.send(message("other")).unwrap();
+        assert!(!send_started(&mut rx, "ble:A", SHORT).await);
+    }
+
+    #[tokio::test]
+    async fn silence_is_a_send_that_never_started() {
+        let (_tx, mut rx) = broadcast::channel::<ChannelMessage>(8);
+        assert!(!send_started(&mut rx, "ble:A", SHORT).await);
+    }
+
+    #[tokio::test]
+    async fn a_stopped_service_is_not_reported_as_a_failed_send() {
+        let (tx, mut rx) = broadcast::channel::<ChannelMessage>(8);
+        drop(tx);
+        assert!(send_started(&mut rx, "ble:A", SHORT).await);
     }
 }

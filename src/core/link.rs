@@ -747,6 +747,21 @@ impl NmLink {
     }
 }
 
+/// Whether firewalld is running: only then the upgrade port can be opened on its own; with any
+/// other firewall the hotspot goes to the `trusted` zone, which lets the phone reach every port.
+pub async fn firewall_managed() -> bool {
+    async {
+        let connection = Connection::system().await?;
+        let name = zbus::names::BusName::try_from("org.fedoraproject.FirewallD1")?;
+        zbus::fdo::DBusProxy::new(&connection)
+            .await?
+            .name_has_owner(name)
+            .await
+    }
+    .await
+    .unwrap_or(false)
+}
+
 fn busy() -> io::Error {
     io::Error::new(
         io::ErrorKind::WouldBlock,

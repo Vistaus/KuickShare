@@ -12,6 +12,7 @@
 //! one lock shared with the send: no scan while a dial or a transfer is going on.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
@@ -29,9 +30,9 @@ use super::{BleTarget, EndpointInfo, OutboundPayload};
 use crate::DeviceType;
 use crate::channel::ChannelMessage;
 
-/// Long enough to catch a phone that advertises every second or two, short enough for a
-/// refresh button. The window is never cut short: a phone can show up at any moment of it.
-pub const SCAN_WINDOW: Duration = Duration::from_secs(10);
+/// Long enough to catch a phone that advertises its full record only every 10 s (the Pixel does,
+/// seen in a capture), short enough for a refresh button. The window is never cut short: a phone can show up at any moment of it.
+pub const SCAN_WINDOW: Duration = Duration::from_secs(15);
 
 /// Minimum time between the starts of two discovery windows.
 pub const MIN_SCAN_INTERVAL: Duration = Duration::from_secs(4);
@@ -143,6 +144,7 @@ pub async fn scan_window(
     mut sink: impl FnMut(ScanEvent),
 ) -> anyhow::Result<()> {
     dedup.begin_window();
+    debug!("scan window of {duration:?} starts");
     adapter
         .set_discovery_filter(DiscoveryFilter {
             transport: DiscoveryTransport::Le,
@@ -152,10 +154,25 @@ pub async fn scan_window(
         .await
         .context("set the discovery filter")?;
     collect(adapter, duration, dedup, &mut sink).await?;
+    wait_discovery_stopped(adapter).await;
     for id in dedup.end_window() {
         sink(ScanEvent::Gone(id));
     }
     Ok(())
+}
+
+/// bluer ends the BlueZ discovery a moment after its stream is dropped. A new discovery started
+/// before that is cancelled by the late stop and then sees nothing, which left a rescan that
+/// followed a scan at once deaf (a send started right after the list was filled never found its
+/// phone). Waits, for a short while at most, until BlueZ reports the discovery as stopped.
+async fn wait_discovery_stopped(adapter: &Adapter) {
+    for _ in 0..40 {
+        if !adapter.is_discovering().await.unwrap_or(false) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    debug!("BlueZ still reports the discovery as running");
 }
 
 async fn collect(
@@ -179,6 +196,12 @@ async fn collect(
                     if let Some(found) = read_device(adapter, address).await
                         && let Some(new) = dedup.observe(found)
                     {
+                        debug!(
+                            "scan sees {} (PSM {:?}, {} dBm)",
+                            BleTarget { endpoint_id: new.endpoint_id }.id(),
+                            new.psm,
+                            new.rssi.unwrap_or_default()
+                        );
                         sink(ScanEvent::Found(new));
                     }
                 }
@@ -192,11 +215,18 @@ async fn collect(
 /// BlueZ keeps devices it saw long ago: only one with an RSSI is on the air now.
 async fn read_device(adapter: &Adapter, address: Address) -> Option<ScanResult> {
     let device = adapter.device(address).ok()?;
-    let rssi = device.rssi().await.ok()??;
     let data = device.service_data().await.ok()??;
     let bytes = data.get(&Uuid::from_u16(SERVICE_UUID))?;
+    let Some(rssi) = device.rssi().await.ok()? else {
+        trace!("{address}: 0xFEF3 data but no RSSI, so not on the air now");
+        return None;
+    };
     let address_type = device.address_type().await.ok()?;
-    scan_result(address, address_type, Some(rssi), bytes)
+    let result = scan_result(address, address_type, Some(rssi), bytes);
+    if result.is_none() {
+        trace!("{address}: unusable 0xFEF3 data ({} bytes)", bytes.len());
+    }
+    result
 }
 
 /// What the `EndpointInfo` bus is told about a scan event.
@@ -288,7 +318,23 @@ async fn find_target(
 ) -> anyhow::Result<ScanResult> {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut dedup = Dedup::default();
+    let without_psm = AtomicBool::new(false);
     let scan = scan_window(adapter, window, &mut dedup, |event| {
+        if let ScanEvent::Found(r) = &event {
+            if r.endpoint_id == target.endpoint_id && r.psm.is_none() {
+                without_psm.store(true, Ordering::Relaxed);
+            }
+            debug!(
+                "rescan sees {} (PSM {:?}, {} dBm), wanted {}",
+                BleTarget {
+                    endpoint_id: r.endpoint_id
+                }
+                .id(),
+                r.psm,
+                r.rssi.unwrap_or_default(),
+                target.id()
+            );
+        }
         if let Some(r) = target_found(event, target) {
             let _ = tx.send(r);
         }
@@ -298,10 +344,19 @@ async fn find_target(
         Some(found) = rx.recv() => Ok(found),
         r = &mut scan => {
             r?;
-            rx.try_recv().map_err(|_| anyhow::anyhow!(
-                "{} not seen within {window:?}: is Quick Share open on it, visible to Everyone?",
-                target.id()
-            ))
+            rx.try_recv().map_err(|_| {
+                if without_psm.load(Ordering::Relaxed) {
+                    anyhow::anyhow!(
+                        "{} is visible but its advertisement has no Bluetooth L2CAP channel (PSM); it may offer GATT only, which KuickShare cannot send over yet",
+                        target.id()
+                    )
+                } else {
+                    anyhow::anyhow!(
+                        "{} not seen within {window:?}: is Quick Share open on it, visible to Everyone?",
+                        target.id()
+                    )
+                }
+            })
         }
         () = ctk.cancelled() => bail!("cancelled while looking for {}", target.id()),
     }

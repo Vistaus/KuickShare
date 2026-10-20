@@ -66,6 +66,7 @@ Bluetooth devices are listed only while `WifiUpgrade` is on, can be sent to but 
 | `Decline` | `(s id)` | Decline it | same |
 | `Cancel` | `(s id)` | Cancel a running transfer, either direction | same |
 | `StartDiscovery` | `()` | Start looking for nearby devices; reported by `DeviceFound` / `DeviceLost`. Does nothing if already on | Service not running |
+| `FirewallManaged` | `() → b` | Whether firewalld is running on the system bus. When it is not, the Wi-Fi upgrade cannot open one port and the hotspot uses the `trusted` zone; the shell asks for confirmation before turning the setting on | None |
 | `ScanBluetooth` | `()` | Run one more Bluetooth LE scan window (a few seconds) for phones in Receive mode; results arrive as `DeviceFound`. Does nothing without `WifiUpgrade`, a Bluetooth adapter, while a scan or Bluetooth send runs, or within 4 seconds of the previous window | Service not running; discovery is not running |
 | `StopDiscovery` | `()` | Stop looking and forget the devices found so far, so sending to one needs a new `StartDiscovery` | none |
 | `SendFiles` | `(s device_id, as paths)` | Send files to a discovered device. A Bluetooth device is scanned for again first (up to 12 seconds) | Empty list; a path that cannot be read; unknown device; Bluetooth device while `WifiUpgrade` is off; service stopped |

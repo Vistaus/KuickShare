@@ -85,6 +85,9 @@ public:
     void setTrayIcon(bool show);
     void setTrustedDevicesEnabled(bool enabled);
     void setWifiUpgrade(bool enabled);
+    /// Turns the Wi-Fi upgrade on, or emits `firewallWarning` first when firewalld is not running (the
+    /// hotspot would then use a zone that lets the phone reach every port) and waits for the user.
+    Q_INVOKABLE void requestWifiUpgrade();
     void setDolphinIntegration(bool enabled);
     void setHistoryKeepDays(int days);
     Q_INVOKABLE void removeTransfer(const QString &id);
@@ -156,6 +159,7 @@ Q_SIGNALS:
     void trayIconChanged();
     void trustedDevicesEnabledChanged();
     void wifiUpgradeChanged();
+    void firewallWarning();
     void dolphinIntegrationChanged();
     void historyKeepDaysChanged();
     void trustedDevicesChanged();

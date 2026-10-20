@@ -137,12 +137,19 @@ FormCard.FormCardPage {
     FormCard.FormCard {
         maximumWidth: width - 1
         FormCard.FormSwitchDelegate {
+            id: wifiSwitch
             icon.name: "network-wireless"
             text: i18n("Receive without a shared network")
             description: i18n("Be found over Bluetooth and move the transfer to a temporary Wi-Fi hotspot")
             checked: page.core.wifiUpgrade
             enabled: page.core.connected
-            onToggled: page.core.wifiUpgrade = checked
+            onToggled: {
+                if (checked) {
+                    page.core.requestWifiUpgrade();
+                } else {
+                    page.core.wifiUpgrade = false;
+                }
+            }
         }
     }
     FormCard.FormSectionText {
@@ -327,6 +334,22 @@ FormCard.FormCardPage {
         text: i18n("Without the tray icon, closing the window quits KuickShare, and nothing can be received until you open it again. At login it starts hidden: open KuickShare again to show the window.")
         Layout.fillWidth: true
         Layout.topMargin: Kirigami.Units.largeSpacing
+    }
+    Connections {
+        target: page.core
+
+        function onFirewallWarning() {
+            firewallDialog.open();
+        }
+    }
+    Kirigami.PromptDialog {
+        id: firewallDialog
+        title: i18n("firewalld is not running")
+        subtitle: i18n("firewalld is not running, so the firewall cannot be opened for a single port. While the hotspot is up, the phone that joins it can reach every service on this computer. Turn it on anyway?")
+        standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
+        onAccepted: page.core.wifiUpgrade = true
+        // The switch was toggled by hand: show the real setting again.
+        onClosed: wifiSwitch.checked = Qt.binding(() => page.core.wifiUpgrade)
     }
     Kirigami.PromptDialog {
         id: resetDialog

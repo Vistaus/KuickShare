@@ -490,6 +490,21 @@ void CoreBridge::setWifiUpgrade(bool enabled)
     setRemoteProperty(QStringLiteral("WifiUpgrade"), enabled);
 }
 
+void CoreBridge::requestWifiUpgrade()
+{
+    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(methodCall(iface, QStringLiteral("FirewallManaged"))), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher *w)
+            {
+        w->deleteLater();
+        const QDBusPendingReply<bool> reply = *w;
+        // A core that cannot answer is not a reason to refuse the setting.
+        if (reply.isError() || reply.value()) {
+            setWifiUpgrade(true);
+        } else {
+            emit firewallWarning();
+        } });
+}
+
 void CoreBridge::setDolphinIntegration(bool enabled)
 {
     if (enabled == m_dolphinIntegration) {

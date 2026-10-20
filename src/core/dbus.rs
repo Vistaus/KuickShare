@@ -73,6 +73,12 @@ impl Service {
         self.core.lock().await.start_discovery().map_err(failed)
     }
 
+    /// Whether firewalld runs on the system bus. Without it the Wi-Fi upgrade cannot open one port
+    /// in the firewall and lets the phone reach every port while the hotspot is up.
+    async fn firewall_managed(&self) -> bool {
+        crate::link::firewall_managed().await
+    }
+
     /// Looks for nearby phones over Bluetooth once more (a few seconds); needs the Wi-Fi upgrade
     /// and a Bluetooth adapter, otherwise it silently finds nothing.
     async fn scan_bluetooth(&self) -> fdo::Result<()> {
@@ -918,16 +924,20 @@ pub async fn forward_trust_events(
     }
 }
 
-/// Reports a transfer that never started as failed (`Disconnected`), without a history entry.
-pub async fn emit_failed_transfer(connection: &Connection, id: &str, device: &str) {
-    let event = TransferEvent {
+fn failed_transfer_event(id: &str, device: &str) -> TransferEvent {
+    TransferEvent {
         id: id.to_owned(),
         kind: "outbound",
         state: format!("{:?}", TransferState::Disconnected),
         device: device.to_owned(),
         last_event: history::now(),
         ..TransferEvent::default()
-    };
+    }
+}
+
+/// Reports a transfer that never started as failed (`Disconnected`), without a history entry.
+pub async fn emit_failed_transfer(connection: &Connection, id: &str, device: &str) {
+    let event = failed_transfer_event(id, device);
     let emitted = async {
         let iface = interface_ref(connection).await?;
         Service::transfer_updated(iface.signal_emitter(), &event.id, event.info()).await
@@ -982,6 +992,16 @@ mod tests {
 
     fn text(info: &HashMap<&'static str, Variant<'static>>, key: &str) -> String {
         String::try_from(info[key].clone()).unwrap()
+    }
+
+    #[test]
+    fn a_send_that_never_started_is_an_outbound_disconnection_without_data() {
+        let event = failed_transfer_event("ble:G483", "Pixel");
+        assert_eq!(event.id, "ble:G483");
+        assert_eq!(event.kind, "outbound");
+        assert_eq!(event.state, "Disconnected");
+        assert_eq!(event.device, "Pixel");
+        assert_eq!((event.total_bytes, event.ack_bytes), (0, 0));
     }
 
     #[test]

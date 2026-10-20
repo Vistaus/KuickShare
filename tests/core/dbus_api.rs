@@ -57,6 +57,11 @@ impl Daemon {
         let conn = connect(&address).await;
         let core = Command::new(env!("CARGO_BIN_EXE_kuickshared"))
             .env("DBUS_SESSION_BUS_ADDRESS", &address)
+            // The system bus of the machine running the tests must not leak in (firewalld).
+            .env(
+                "DBUS_SYSTEM_BUS_ADDRESS",
+                "unix:path=/nonexistent/kuickshare-it",
+            )
             .env("HOME", &dir)
             .env("XDG_CONFIG_HOME", dir.join("config"))
             .env("XDG_DATA_HOME", dir.join("data"))
@@ -358,4 +363,17 @@ async fn a_bluetooth_scan_without_bluez_is_harmless() {
     daemon.call("StartDiscovery", &()).await.unwrap();
     daemon.call("ScanBluetooth", &()).await.unwrap();
     daemon.call("StopDiscovery", &()).await.unwrap();
+}
+
+#[tokio::test]
+async fn the_firewall_check_answers_even_without_a_system_bus() {
+    let daemon = Daemon::start("firewall", None).await;
+
+    // No system bus is reachable: "not managed" is the answer, not an error.
+    let reply = daemon
+        .conn
+        .call_method(Some(NAME), PATH, Some(IFACE), "FirewallManaged", &())
+        .await
+        .unwrap();
+    assert!(!reply.body().deserialize::<bool>().unwrap());
 }
