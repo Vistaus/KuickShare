@@ -388,7 +388,11 @@ Kirigami.ScrollablePage {
                 fadeIn.restart();
             }
             // The entry stays in the list while it fades out.
-            ListView.onRemove: SequentialAnimation {
+            ListView.onRemove: removeAnimation.start()
+
+            SequentialAnimation {
+                id: removeAnimation
+
                 PropertyAction {
                     target: cell
                     property: "ListView.delayRemove"

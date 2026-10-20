@@ -171,16 +171,16 @@ Sending to the phone produces the same notifications in the other direction. If 
 
 ## Without a shared network (experimental)
 
-With **Settings → Wi-Fi hotspot → Receive without a shared network** on, a phone whose Wi-Fi is off or on another network can send to this computer, and this computer can send to it. The transfer starts over Bluetooth and moves to a temporary Wi-Fi link. It is off by default and not usable yet by a normal user (see the limits below).
+With **Settings → Wi-Fi hotspot → Receive without a shared network** on, a phone whose Wi-Fi is off or on another network can send to this computer, and this computer can send to it. The transfer starts over Bluetooth and moves to a temporary Wi-Fi link. It is off by default.
 
 | | Receiving | Sending |
 |---|---|---|
 | Phone | Quick Share open on the share sheet | Quick Share's receive screen open, visibility **Everyone** |
 | Computer | Visible; the setting on | The phone appears with a Bluetooth icon on the Send page. The refresh button next to "Send to" scans again (a scan lasts about 10 s and is never continuous) |
 | Wi-Fi link | This computer starts a hotspot | The phone starts a Wi-Fi Direct group and this computer joins it |
-| Privileges | The DHCP server needs capabilities that the daemon does not have yet | None |
+| Needs | The `dnsmasq` package: NetworkManager runs it to give the phone an address | Nothing extra |
 
-- Needs NetworkManager and Bluetooth. A computer with one radio can lose its Wi-Fi connection while the link is up.
+- Needs NetworkManager and Bluetooth, no privileges. A computer with one radio can lose its Wi-Fi connection while the link is up.
 - While the setting is on, this computer is visible over Bluetooth, under its device name, to devices in range. Nothing is sent without your consent.
 - "Accept and trust" is not offered for Bluetooth transfers, and a PIN is shown for each one: compare it with the phone.
 - A phone on the same network as the computer refuses the Wi-Fi upgrade; use the normal path then.

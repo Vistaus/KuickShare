@@ -18,6 +18,7 @@ finish-args:
   - --system-talk-name=org.bluez
   # Wi-Fi upgrade: hotspot and join through NetworkManager (off unless enabled in the settings).
   - --system-talk-name=org.freedesktop.NetworkManager
+  - --system-talk-name=org.fedoraproject.FirewallD1
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.kde.JobViewServer

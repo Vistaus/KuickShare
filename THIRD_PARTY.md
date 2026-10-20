@@ -60,7 +60,6 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | serde_json | 1.0.154 | MIT OR Apache-2.0 |
 | sha2 | 0.11.1 | MIT OR Apache-2.0 |
 | snow | 0.10.0 | Apache-2.0 OR MIT |
-| socket2 | 0.6.5 | MIT OR Apache-2.0 |
 | tokio | 1.54.0 | MIT |
 | tracing | 0.1.44 | MIT |
 | tracing-subscriber | 0.3.23 | MIT |
@@ -69,7 +68,7 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 ### Transitive dependencies
 
 <details>
-<summary>222 crates</summary>
+<summary>223 crates</summary>
 
 | Crate | Version | License |
 | --- | --- | --- |
@@ -226,6 +225,7 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | slab | 0.4.12 | MIT |
 | smallvec | 1.16.3 | MIT OR Apache-2.0 |
 | socket2 | 0.4.10 | MIT OR Apache-2.0 |
+| socket2 | 0.6.5 | MIT OR Apache-2.0 |
 | spin | 0.9.9 | MIT |
 | spki | 0.7.3 | Apache-2.0 OR MIT |
 | strsim | 0.11.1 | MIT |

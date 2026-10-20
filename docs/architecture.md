@@ -70,7 +70,6 @@ flowchart LR
 | `app.rs` | `Core`: owns the `rqs_lib` engine and the settings. Settings that change the device name or port rebuild the engine, and the old values are restored if that fails |
 | `dbus.rs` | The D-Bus interface, plus forwarder tasks that turn library events into signals, run the consent timeout, the name guard and auto-accept |
 | `link.rs` | `NmLink`: the Wi-Fi link of the upgrade over NetworkManager's D-Bus (access point or join); see [Wi-Fi upgrade](wifi-direct.md) |
-| `dhcp.rs` | Minimal DHCP server for the access point |
 | `trust.rs` | Noise XX channel on TCP 47891: probe, announce, pairing |
 | `allowed.rs` | Trusted devices by name and MAC |
 | `safety.rs` | File name guard |
@@ -140,7 +139,7 @@ sequenceDiagram
     P->>L: UKEY2, connection request (same events as above)
     L->>C: WaitingForUserConsent (always asks, no trust)
     L->>C: link.host() asks for a hotspot
-    C->>N: AddAndActivateConnection2 (AP, DHCP server on port 67)
+    C->>N: open the port in firewalld, then AddAndActivateConnection2 (AP, IPv4 shared: dnsmasq serves DHCP)
     L->>P: UPGRADE_PATH_AVAILABLE (ssid, password)
     P->>L: joins, TCP connect, files continue there
 
@@ -295,7 +294,7 @@ Assumes the attacker is on the same LAN, or a malicious app runs as the same use
 | Forged "trusted" display on a card | The trust label comes from the core's probe, not from the advert | Depends on the probe being correct |
 | A nearby device uses the Bluetooth receiver (setting on) to read or cut a session | Only the device that opens the session with a valid connection request can write to it; one session at a time, new ones refused while one is live; a transfer still needs the user's consent and is never auto-accepted (ids `ble-N`) | A device can claim the slot in the instant between the phone's subscribe and its first write, and hold it while it keeps writing |
 | A peer's upgrade offer points the computer at a hostile network | SSID and password are validated, the gateway must be a private address, the profile never takes the default route or DNS and is kept in memory | The computer joins a network chosen by the peer |
-| The access point and its DHCP server on the user's radio | Random 32-character key, one client, DHCP started only when the access point is active, profiles deleted afterwards and at start | The firewall zone is `trusted` while it is up; the DHCP port needs privileges that are not designed yet |
+| The access point on the user's radio | Random 32-character key, profiles deleted afterwards and at start; NetworkManager's `dnsmasq` serves DHCP, so the daemon holds no extra privilege | Only the upgrade port is open to whoever joined (firewalld zone `nm-shared`); where firewalld cannot be changed the zone is `trusted` and every port is open |
 
 ## Display of remote names
 

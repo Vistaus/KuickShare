@@ -1,6 +1,7 @@
 //! `WifiLink` on top of NetworkManager's D-Bus API.
 //!
-//! Hosting creates an AP-mode WPA2 profile plus our DHCP server; joining
+//! Hosting creates an AP-mode WPA2 profile whose `shared` IPv4 method makes NetworkManager run
+//! the DHCP server (its own `dnsmasq`, which must be installed); joining
 //! connects to the phone's network as a client. All NetworkManager access goes
 //! through the small `NmApi` trait so tests can fake it. The Wi-Fi key only
 //! travels over D-Bus (never in a command line).
@@ -18,25 +19,23 @@ use rand::{Rng, distr::Alphanumeric};
 use rqs_lib::upgrade::{BoxFuture, WifiCredentials, WifiLink};
 use tokio::{
     sync::{Mutex, MutexGuard},
-    task::JoinHandle,
     time::sleep,
 };
 
-use crate::dhcp::{self, DhcpConfig};
-
 const AP_PROFILE: &str = "kuickshare-ap";
 const JOIN_PROFILE: &str = "kuickshare-join";
+/// firewalld zone NetworkManager uses for connection sharing: it allows DHCP and DNS only, so the
+/// upgrade port is opened in it for the transfer.
+const SHARED_ZONE: &str = "nm-shared";
+/// Fallback when the port cannot be opened: every port is reachable by the phone that joined.
+const OPEN_ZONE: &str = "trusted";
+/// The port opening expires by itself if the daemon dies before closing it.
+const PORT_OPEN_SECS: i32 = 300;
 /// Every profile we create starts with this; used to sweep leftovers.
 const PROFILE_PREFIX: &str = "kuickshare-";
 
 // A fixed subnet can clash with a local network that uses 192.168.49.0/24.
 const GATEWAY: Ipv4Addr = Ipv4Addr::new(192, 168, 49, 1);
-const DHCP: DhcpConfig = DhcpConfig {
-    server_ip: GATEWAY,
-    client_ip: Ipv4Addr::new(192, 168, 49, 2),
-    netmask: Ipv4Addr::new(255, 255, 255, 0),
-    lease_secs: 3600,
-};
 
 /// The phone accepts a join attempt for only ~4-5 s, so a few short attempts.
 const JOIN_ATTEMPTS: u32 = 4;
@@ -103,6 +102,8 @@ pub struct ConnSettings {
     ssid: Vec<u8>,
     psk: Secret,
     kind: Kind,
+    /// firewalld zone of an access point; empty leaves the choice to NetworkManager.
+    zone: &'static str,
 }
 
 fn invalid(msg: &str) -> io::Error {
@@ -124,6 +125,7 @@ impl ConnSettings {
             ssid: ssid.as_bytes().to_vec(),
             psk: Secret(psk.to_owned()),
             kind,
+            zone: "",
         })
     }
 }
@@ -163,9 +165,9 @@ mod wire {
         let (ipv4, ipv6);
         match s.kind {
             Kind::Ap(band) => {
-                // TODO(privileges phase): "trusted" opens every port to the group's
-                // client; replace with a narrower firewall rule (upgrade port + DHCP).
-                conn.push(("zone", Variant::from("trusted")));
+                if !s.zone.is_empty() {
+                    conn.push(("zone", Variant::from(s.zone)));
+                }
                 wireless.extend([
                     ("mode", Variant::from("ap")),
                     ("band", Variant::from(band.nm_name)),
@@ -181,7 +183,7 @@ mod wire {
                     ("prefix", Variant::from(24u32)),
                 ]);
                 ipv4 = section([
-                    ("method", Variant::from("manual")),
+                    ("method", Variant::from("shared")),
                     ("address-data", Variant::from(vec![address])),
                 ]);
                 ipv6 = section([("method", Variant::from("disabled"))]);
@@ -262,6 +264,9 @@ pub trait NmApi: Send + Sync {
     fn ipv4(&self, dev: &WifiDevice) -> impl Future<Output = io::Result<Option<Ipv4Addr>>> + Send;
     fn deactivate(&self, active: &str) -> impl Future<Output = io::Result<()>> + Send;
     fn delete(&self, settings: &str) -> impl Future<Output = io::Result<()>> + Send;
+    /// Opens a TCP port in the `nm-shared` firewalld zone until `close_port` (or a timeout).
+    fn open_port(&self, port: u16) -> impl Future<Output = io::Result<()>> + Send;
+    fn close_port(&self, port: u16) -> impl Future<Output = io::Result<()>> + Send;
     /// Activates an existing profile on the device.
     fn activate(
         &self,
@@ -274,6 +279,24 @@ mod proxies {
     use std::collections::HashMap;
 
     use zbus::{ObjectPath, OwnedObjectPath, OwnedVariant, Variant, proxy};
+
+    #[proxy(
+        interface = "org.fedoraproject.FirewallD1.zone",
+        default_service = "org.fedoraproject.FirewallD1",
+        default_path = "/org/fedoraproject/FirewallD1"
+    )]
+    pub trait FirewallZone {
+        #[zbus(name = "addPort")]
+        fn add_port(
+            &self,
+            zone: &str,
+            port: &str,
+            protocol: &str,
+            timeout: i32,
+        ) -> zbus::Result<String>;
+        #[zbus(name = "removePort")]
+        fn remove_port(&self, zone: &str, port: &str, protocol: &str) -> zbus::Result<String>;
+    }
 
     #[proxy(
         interface = "org.freedesktop.NetworkManager",
@@ -640,6 +663,32 @@ impl NmApi for DbusNm {
         .map_err(io_err)
     }
 
+    async fn open_port(&self, port: u16) -> io::Result<()> {
+        async {
+            let c = self.conn().await?;
+            FirewallZoneProxy::new(c)
+                .await?
+                .add_port(SHARED_ZONE, &port.to_string(), "tcp", PORT_OPEN_SECS)
+                .await
+                .map(drop)
+        }
+        .await
+        .map_err(io_err)
+    }
+
+    async fn close_port(&self, port: u16) -> io::Result<()> {
+        async {
+            let c = self.conn().await?;
+            FirewallZoneProxy::new(c)
+                .await?
+                .remove_port(SHARED_ZONE, &port.to_string(), "tcp")
+                .await
+                .map(drop)
+        }
+        .await
+        .map_err(io_err)
+    }
+
     async fn activate(&self, dev: &WifiDevice, settings: &str) -> io::Result<()> {
         async {
             let c = self.conn().await?;
@@ -658,25 +707,6 @@ impl NmApi for DbusNm {
 // The link
 // ---------------------------------------------------------------------------
 
-type DhcpStarter = Box<dyn Fn(&str) -> io::Result<JoinHandle<()>> + Send + Sync>;
-
-/// Checks that port 67 can be bound on `iface`, then releases it.
-type DhcpProbe = Box<dyn Fn(&str) -> io::Result<()> + Send + Sync>;
-
-fn probe_dhcp(iface: &str) -> io::Result<()> {
-    dhcp::bind(iface).map(drop)
-}
-
-fn start_dhcp(iface: &str) -> io::Result<JoinHandle<()>> {
-    let socket = dhcp::bind(iface)?;
-    let iface = iface.to_owned();
-    Ok(tokio::spawn(async move {
-        if let Err(e) = dhcp::serve(socket, &iface, DHCP).await {
-            tracing::warn!("DHCP server stopped: {e}");
-        }
-    }))
-}
-
 struct Timing {
     retry_delay: Duration,
     poll_delay: Duration,
@@ -694,13 +724,12 @@ struct State {
     previous: Option<String>,
     /// Set before the first profile is sent to NetworkManager.
     touched: bool,
-    dhcp: Option<JoinHandle<()>>,
+    /// Port opened in the firewall zone and not yet closed.
+    open_port: Option<u16>,
 }
 
 pub struct NmLink<A = DbusNm> {
     api: A,
-    probe_dhcp: DhcpProbe,
-    start_dhcp: DhcpStarter,
     timing: Timing,
     state: Mutex<State>,
 }
@@ -709,8 +738,6 @@ impl NmLink {
     pub fn new() -> Self {
         Self::with_parts(
             DbusNm::new(),
-            Box::new(probe_dhcp),
-            Box::new(start_dhcp),
             Timing {
                 retry_delay: JOIN_RETRY_DELAY,
                 poll_delay: AP_POLL_DELAY,
@@ -728,11 +755,9 @@ fn busy() -> io::Error {
 }
 
 impl<A: NmApi> NmLink<A> {
-    fn with_parts(api: A, probe_dhcp: DhcpProbe, start_dhcp: DhcpStarter, timing: Timing) -> Self {
+    fn with_parts(api: A, timing: Timing) -> Self {
         Self {
             api,
-            probe_dhcp,
-            start_dhcp,
             timing,
             state: Mutex::new(State::default()),
         }
@@ -799,8 +824,10 @@ impl<A: NmApi> NmLink<A> {
         ssid: &str,
         psk: &str,
         band: Band,
+        zone: &'static str,
     ) -> io::Result<()> {
-        let settings = ConnSettings::new(AP_PROFILE, &dev.iface, ssid, psk, Kind::Ap(band))?;
+        let mut settings = ConnSettings::new(AP_PROFILE, &dev.iface, ssid, psk, Kind::Ap(band))?;
+        settings.zone = zone;
         st.touched = true;
         let created = self.api.add_and_activate(dev, None, &settings).await?;
         st.created = Some(created.clone());
@@ -811,25 +838,43 @@ impl<A: NmApi> NmLink<A> {
 
     async fn host_inner(&self, st: &mut State, port: u16) -> io::Result<WifiCredentials> {
         let dev = self.api.wifi_device().await?;
-        // Before anything touches the user's Wi-Fi. The socket is released at
-        // once: serving starts only when the AP is up, so the station interface
-        // never answers other hosts' DHCP requests.
-        (self.probe_dhcp)(&dev.iface)?;
         st.dev = Some(dev.clone());
         self.sweep().await;
         self.remember_previous(st, &dev).await;
 
+        // The phone only needs the upgrade port: open it in the sharing zone, or fall back to a zone
+        // that lets everything in when the firewall cannot be changed (no firewalld, no permission).
+        let zone = match self.api.open_port(port).await {
+            Ok(()) => {
+                st.open_port = Some(port);
+                SHARED_ZONE
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "could not open port {port} in the firewall ({e}); using the trusted zone"
+                );
+                OPEN_ZONE
+            }
+        };
         let (ssid, password) = (random_ssid(), random_password());
-        let band = match self.bring_up(st, &dev, &ssid, &password, BAND_5GHZ).await {
+        let band = match self
+            .bring_up(st, &dev, &ssid, &password, BAND_5GHZ, zone)
+            .await
+        {
             Ok(()) => BAND_5GHZ,
             Err(e) => {
                 tracing::warn!("5 GHz access point failed ({e}); trying 2.4 GHz");
                 self.drop_created(st).await;
-                self.bring_up(st, &dev, &ssid, &password, BAND_2GHZ).await?;
+                self.bring_up(st, &dev, &ssid, &password, BAND_2GHZ, zone)
+                    .await
+                    .inspect_err(|_| {
+                        tracing::warn!(
+                            "the hotspot could not start; a possible cause is a missing dnsmasq package, which NetworkManager needs to share a connection"
+                        );
+                    })?;
                 BAND_2GHZ
             }
         };
-        st.dhcp = Some((self.start_dhcp)(&dev.iface)?);
         Ok(WifiCredentials {
             ssid,
             password,
@@ -931,8 +976,10 @@ impl<A: NmApi> NmLink<A> {
     /// Undoes whatever `st` records and resets it. Failures are only logged.
     async fn teardown(&self, st: &mut State) {
         let mut old = std::mem::take(st);
-        if let Some(task) = old.dhcp.take() {
-            task.abort();
+        if let Some(port) = old.open_port
+            && let Err(e) = self.api.close_port(port).await
+        {
+            tracing::warn!("could not close port {port} in the firewall: {e}");
         }
         self.drop_created(&mut old).await;
         if let (Some(prev), Some(dev)) = (&old.previous, &old.dev)
@@ -1017,10 +1064,7 @@ mod tests {
     use super::*;
     use std::{
         collections::{BTreeSet, HashMap},
-        sync::{
-            Arc, Mutex as StdMutex,
-            atomic::{AtomicBool, Ordering},
-        },
+        sync::{Arc, Mutex as StdMutex},
     };
     use zbus::Variant;
 
@@ -1112,6 +1156,12 @@ mod tests {
             self.live.lock().unwrap().remove(settings);
             Ok(())
         }
+        async fn open_port(&self, port: u16) -> io::Result<()> {
+            self.step("open_port", &port.to_string())
+        }
+        async fn close_port(&self, port: u16) -> io::Result<()> {
+            self.step("close_port", &port.to_string())
+        }
         async fn activate(&self, _: &WifiDevice, settings: &str) -> io::Result<()> {
             self.step("activate", settings)
         }
@@ -1141,16 +1191,8 @@ mod tests {
             self
         }
 
-        fn build(self) -> (NmLink<Fake>, Arc<StdMutex<Vec<String>>>, Arc<AtomicBool>) {
-            self.build_with(true)
-        }
-
-        fn build_with(
-            self,
-            dhcp_ok: bool,
-        ) -> (NmLink<Fake>, Arc<StdMutex<Vec<String>>>, Arc<AtomicBool>) {
+        fn build(self) -> (NmLink<Fake>, Arc<StdMutex<Vec<String>>>) {
             let log = Arc::new(StdMutex::default());
-            let dhcp_alive = Arc::new(AtomicBool::new(false));
             let api = Fake {
                 log: log.clone(),
                 counts: StdMutex::default(),
@@ -1162,40 +1204,12 @@ mod tests {
                 ap_from: self.ap_from,
                 ip: Some(Ipv4Addr::new(192, 168, 49, 7)),
             };
-            let (l, alive) = (log.clone(), dhcp_alive.clone());
-            let l2 = log.clone();
-            let probe: DhcpProbe = Box::new(move |iface| {
-                l2.lock().unwrap().push(format!("dhcp_probe {iface}"));
-                if !dhcp_ok {
-                    return Err(io::Error::other("port 67 busy"));
-                }
-                Ok(())
-            });
-            let starter: DhcpStarter = Box::new(move |iface| {
-                l.lock().unwrap().push(format!("dhcp_bind {iface}"));
-                struct Guard(Arc<AtomicBool>);
-                impl Drop for Guard {
-                    fn drop(&mut self) {
-                        self.0.store(false, Ordering::SeqCst);
-                    }
-                }
-                alive.store(true, Ordering::SeqCst);
-                let guard = Guard(alive.clone());
-                Ok(tokio::spawn(async move {
-                    let _guard = guard;
-                    std::future::pending::<()>().await
-                }))
-            });
             let timing = Timing {
                 retry_delay: Duration::ZERO,
                 poll_delay: Duration::ZERO,
                 budget: self.budget,
             };
-            (
-                NmLink::with_parts(api, probe, starter, timing),
-                log,
-                dhcp_alive,
-            )
+            (NmLink::with_parts(api, timing), log)
         }
     }
 
@@ -1310,7 +1324,7 @@ mod tests {
         assert_eq!(get("connection", "id"), Variant::from("kuickshare-ap"));
         assert_eq!(get("connection", "type"), Variant::from("802-11-wireless"));
         assert_eq!(get("connection", "autoconnect"), Variant::from(false));
-        assert_eq!(get("connection", "zone"), Variant::from("trusted"));
+        assert!(!d["connection"].contains_key("zone"));
         assert_eq!(get("connection", "interface-name"), Variant::from("wlan0"));
         assert_eq!(
             get("802-11-wireless", "ssid"),
@@ -1325,7 +1339,7 @@ mod tests {
         assert_eq!(get(sec, "proto"), Variant::from(vec!["rsn".to_owned()]));
         assert_eq!(get(sec, "pairwise"), Variant::from(vec!["ccmp".to_owned()]));
         assert_eq!(get(sec, "group"), Variant::from(vec!["ccmp".to_owned()]));
-        assert_eq!(get("ipv4", "method"), Variant::from("manual"));
+        assert_eq!(get("ipv4", "method"), Variant::from("shared"));
         assert!(d["ipv4"].contains_key("address-data"));
         assert_eq!(get("ipv6", "method"), Variant::from("disabled"));
     }
@@ -1358,16 +1372,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn host_serves_dhcp_only_after_the_ap_is_active() {
-        let (link, log, dhcp) = fake().build();
+    async fn host_creates_a_shared_ap_with_a_fresh_password() {
+        let (link, log) = fake().build();
         let c = link.host(4000).await.unwrap();
         assert_eq!((c.port, c.frequency_mhz, c.gateway), (4000, 5180, GATEWAY));
         assert!(c.password.len() >= 24);
-        assert!(position(&log, "dhcp_probe wlan0") < position(&log, "add_and_activate"));
-        assert!(position(&log, "wait_activated") < position(&log, "dhcp_bind wlan0"));
-        assert_eq!(count(&log, "dhcp_bind"), 1);
         assert!(position(&log, "stale_profiles") < position(&log, "add_and_activate"));
-        assert!(dhcp.load(Ordering::SeqCst));
         let added = link.api.added.lock().unwrap().clone();
         assert_eq!(added.len(), 1);
         assert_eq!(added[0].0, None);
@@ -1378,13 +1388,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn host_opens_only_its_port_in_the_sharing_zone_and_release_closes_it() {
+        let (link, log) = fake().build();
+        link.host(4000).await.unwrap();
+        assert!(position(&log, "open_port 4000") < position(&log, "add_and_activate"));
+        assert_eq!(link.api.added.lock().unwrap()[0].1.zone, SHARED_ZONE);
+        assert_eq!(count(&log, "close_port"), 0);
+        link.release().await;
+        assert_eq!(count(&log, "close_port 4000"), 1);
+        link.release().await;
+        assert_eq!(count(&log, "close_port"), 1);
+    }
+
+    #[tokio::test]
+    async fn host_falls_back_to_the_open_zone_when_the_firewall_refuses() {
+        let (link, log) = fake().fail(|op, _| op == "open_port").build();
+        link.host(4000).await.unwrap();
+        assert_eq!(link.api.added.lock().unwrap()[0].1.zone, OPEN_ZONE);
+        link.release().await;
+        assert_eq!(count(&log, "close_port"), 0);
+    }
+
+    #[tokio::test]
     async fn release_removes_everything_restores_previous_and_is_idempotent() {
-        let (link, log, dhcp) = fake().build();
+        let (link, log) = fake().build();
         link.host(1).await.unwrap();
         link.release().await;
         settled().await;
         assert_eq!(live(&link), 0);
-        assert!(!dhcp.load(Ordering::SeqCst));
         assert_eq!(count(&log, "deactivate /act/1"), 1);
         assert_eq!(count(&log, "delete /set/1"), 1);
         assert_eq!(count(&log, "activate /prev/home"), 1);
@@ -1398,18 +1429,11 @@ mod tests {
 
     #[tokio::test]
     async fn host_falls_back_to_2ghz_and_drops_the_5ghz_profile() {
-        let (link, log, _) = fake()
+        let (link, log) = fake()
             .fail(|op, n| op == "wait_activated" && n == 1)
             .build();
         let c = link.host(1).await.unwrap();
         assert_eq!(c.frequency_mhz, 2437);
-        assert_eq!(count(&log, "dhcp_bind"), 1);
-        let all = calls(&log);
-        let last_wait = all
-            .iter()
-            .rposition(|c| c.starts_with("wait_activated"))
-            .unwrap();
-        assert!(last_wait < position(&log, "dhcp_bind"));
         let added = link.api.added.lock().unwrap().clone();
         assert_eq!(added.len(), 2);
         assert!(matches!(added[0].1.kind, Kind::Ap(b) if b.nm_name == "a"));
@@ -1420,7 +1444,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_failure_also_falls_back() {
-        let (link, _, _) = fake()
+        let (link, _) = fake()
             .fail(|op, n| op == "add_and_activate" && n == 1)
             .build();
         assert_eq!(link.host(1).await.unwrap().frequency_mhz, 2437);
@@ -1433,12 +1457,12 @@ mod tests {
             ("add_and_activate", 1),
             ("wait_activated", 1),
         ] {
-            let (link, log, dhcp) = fake().fail(move |o, n| o == op && n >= from).build();
+            let (link, log) = fake().fail(move |o, n| o == op && n >= from).build();
             let e = link.host(1).await.unwrap_err();
             assert_eq!(e.to_string(), "boom", "{op}");
             settled().await;
             assert_eq!(live(&link), 0, "{op}");
-            assert!(!dhcp.load(Ordering::SeqCst), "{op}");
+            assert_eq!(count(&log, "close_port"), count(&log, "open_port"), "{op}");
             let wifi_touched = count(&log, "add_and_activate") > 0;
             assert_eq!(count(&log, "activate /prev/home"), wifi_touched as usize);
             let n = quiet_len(&log);
@@ -1449,7 +1473,7 @@ mod tests {
 
     #[tokio::test]
     async fn only_the_second_attempt_failing_cleans_up_too() {
-        let (link, _, _) = fake()
+        let (link, _) = fake()
             .fail(|op, n| {
                 (op == "wait_activated" && n >= 1) || (op == "add_and_activate" && n == 2)
             })
@@ -1460,7 +1484,7 @@ mod tests {
 
     #[tokio::test]
     async fn lookups_that_fail_do_not_stop_hosting() {
-        let (link, _, _) = fake()
+        let (link, _) = fake()
             .fail(|op, _| op == "stale_profiles" || op == "current_profile")
             .build();
         link.host(1).await.unwrap();
@@ -1469,20 +1493,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dhcp_bind_failure_leaves_the_wifi_alone() {
-        let (link, log, _) = fake().build_with(false);
-        assert!(link.host(1).await.unwrap_err().to_string().contains("busy"));
-        for touching in ["add_and_activate", "delete", "activate", "deactivate"] {
-            assert_eq!(count(&log, touching), 0, "{touching}");
-        }
-        assert_eq!(count(&log, "dhcp_bind"), 0);
-        // Not stuck busy.
-        assert!(link.host(1).await.is_err());
-    }
-
-    #[tokio::test]
     async fn a_second_upgrade_is_refused_and_does_not_tear_down_the_first() {
-        let (link, log, dhcp) = fake().build();
+        let (link, log) = fake().build();
         link.host(1).await.unwrap();
         let n = quiet_len(&log);
         let e = link.host(2).await.unwrap_err();
@@ -1491,7 +1503,6 @@ mod tests {
         assert_eq!(e.kind(), io::ErrorKind::WouldBlock);
         assert_eq!(quiet_len(&log), n);
         assert_eq!(live(&link), 1);
-        assert!(dhcp.load(Ordering::SeqCst));
         link.release().await;
         assert_eq!(live(&link), 0);
     }
@@ -1501,7 +1512,7 @@ mod tests {
         let stale = || vec!["/old/1".to_owned(), "/old/2".to_owned()];
         let mut b = fake();
         b.stale = stale();
-        let (link, log, _) = b.build();
+        let (link, log) = b.build();
         link.host(1).await.unwrap();
         assert_eq!(count(&log, "delete /old/"), 2);
         assert!(position(&log, "delete /old/1") < position(&log, "add_and_activate"));
@@ -1509,7 +1520,7 @@ mod tests {
 
         let mut b = fake();
         b.stale = stale();
-        let (link, log, _) = b.build();
+        let (link, log) = b.build();
         link.join(&creds()).await.unwrap();
         assert_eq!(count(&log, "delete /old/"), 2);
         assert!(position(&log, "delete /old/2") < position(&log, "add_and_activate"));
@@ -1519,7 +1530,7 @@ mod tests {
     async fn cleanup_stale_sweeps_and_tears_down() {
         let mut b = fake();
         b.stale = vec!["/old/1".into()];
-        let (link, log, _) = b.build();
+        let (link, log) = b.build();
         link.host(1).await.unwrap();
         link.cleanup_stale().await;
         assert_eq!(count(&log, "delete /old/1"), 2); // sweep at host + at cleanup
@@ -1529,7 +1540,7 @@ mod tests {
 
     #[tokio::test]
     async fn join_pins_the_ap_returns_ip_and_restores_previous() {
-        let (link, log, _) = fake().build();
+        let (link, log) = fake().build();
         let c = creds();
         assert_eq!(link.join(&c).await.unwrap(), Ipv4Addr::new(192, 168, 49, 7));
         let added = link.api.added.lock().unwrap().clone();
@@ -1537,7 +1548,6 @@ mod tests {
         assert_eq!(added[0].0.as_deref(), Some("/ap/1"));
         assert_eq!(added[0].1.psk.0, c.password);
         assert!(matches!(added[0].1.kind, Kind::Client { hidden: false }));
-        assert_eq!(count(&log, "dhcp_bind"), 0);
         assert_no_secret(&link, &log, &c.password);
 
         link.release().await;
@@ -1552,7 +1562,7 @@ mod tests {
     async fn join_waits_for_the_ap_to_show_up() {
         let mut b = fake();
         b.ap_from = 4;
-        let (link, log, _) = b.build();
+        let (link, log) = b.build();
         link.join(&creds()).await.unwrap();
         assert_eq!(count(&log, "find_ap"), 4);
         assert_eq!(count(&log, "request_scan"), 1);
@@ -1561,7 +1571,7 @@ mod tests {
 
     #[tokio::test]
     async fn join_retries_and_cleans_each_failed_attempt() {
-        let (link, log, _) = fake()
+        let (link, log) = fake()
             .fail(|op, n| op == "wait_activated" && n <= 2)
             .build();
         link.join(&creds()).await.unwrap();
@@ -1583,7 +1593,7 @@ mod tests {
     async fn join_tries_hidden_when_the_ap_is_never_seen_then_gives_up() {
         let mut b = fake().fail(|op, _| op == "wait_activated");
         b.ap_from = 0;
-        let (link, log, _) = b.build();
+        let (link, log) = b.build();
         let c = creds();
         let e = link.join(&c).await.unwrap_err();
         assert_eq!(e.to_string(), "boom");
@@ -1606,7 +1616,7 @@ mod tests {
         let mut b = fake();
         b.ap_from = 0;
         b.budget = Duration::ZERO;
-        let (link, log, _) = b.build();
+        let (link, log) = b.build();
         let e = link.join(&creds()).await.unwrap_err();
         assert_eq!(e.kind(), io::ErrorKind::NotFound);
         assert_eq!(count(&log, "request_scan"), 1); // budget spent after one attempt
@@ -1623,7 +1633,7 @@ mod tests {
             "wait_activated",
             "ipv4",
         ] {
-            let (link, log, _) = fake().fail(move |o, _| o == op).build();
+            let (link, log) = fake().fail(move |o, _| o == op).build();
             assert!(link.join(&creds()).await.is_err(), "{op}");
             assert_eq!(live(&link), 0, "{op}");
             let n = quiet_len(&log);
@@ -1636,7 +1646,7 @@ mod tests {
 
     #[tokio::test]
     async fn join_without_ip_fails_and_cleans_up() {
-        let (mut link, _, _) = fake().build();
+        let (mut link, _) = fake().build();
         link.api.ip = None;
         assert!(link.join(&creds()).await.is_err());
         assert_eq!(live(&link), 0);
@@ -1644,7 +1654,7 @@ mod tests {
 
     #[tokio::test]
     async fn join_rejects_bad_credentials_before_touching_anything() {
-        let (link, log, _) = fake().build();
+        let (link, log) = fake().build();
         let mut c = creds();
         c.ssid = "s".repeat(33);
         let e = link.join(&c).await.unwrap_err();
@@ -1665,12 +1675,12 @@ mod tests {
         let mut b = fake();
         b.ap_from = 0;
         b.budget = Duration::ZERO;
-        let (link, log, _) = b.build();
+        let (link, log) = b.build();
         assert!(link.join(&creds()).await.is_err());
         assert_eq!(count(&log, "activate /prev/home"), 0);
 
         // The device's active connection is no longer the one remembered.
-        let (mut link, log, _) = fake().build();
+        let (mut link, log) = fake().build();
         link.api.previous = Some("/prev/home".into());
         let mut st = link.state.lock().await;
         st.dev = Some(link.api.wifi_device().await.unwrap());
@@ -1684,14 +1694,14 @@ mod tests {
     async fn release_sweeps_a_profile_whose_creation_was_interrupted() {
         let mut b = fake();
         b.stale = vec!["/leaked/1".into()];
-        let (link, log, _) = b.build();
+        let (link, log) = b.build();
         link.release().await;
         assert_eq!(count(&log, "delete /leaked/1"), 1);
     }
 
     #[tokio::test]
     async fn an_unreadable_profile_list_is_not_fatal_for_release() {
-        let (link, _, _) = fake().fail(|op, _| op == "stale_profiles").build();
+        let (link, _) = fake().fail(|op, _| op == "stale_profiles").build();
         link.release().await;
     }
 
@@ -1699,9 +1709,20 @@ mod tests {
     async fn no_previous_connection_means_nothing_to_restore() {
         let mut b = fake();
         b.previous = None;
-        let (link, log, _) = b.build();
+        let (link, log) = b.build();
         link.host(1).await.unwrap();
         link.release().await;
         assert_eq!(count(&log, "activate"), 0);
+    }
+
+    /// Run by hand: `cargo test -p kuickshare-core real_networkmanager -- --ignored`. The Wi-Fi
+    /// connection drops while the hotspot is up and is restored by `release`.
+    #[tokio::test]
+    #[ignore = "needs NetworkManager and a Wi-Fi card that can run an access point"]
+    async fn real_networkmanager_hosts_and_releases() {
+        let link = NmLink::new();
+        let creds = link.host(40000).await.expect("hotspot");
+        assert!(!creds.ssid.is_empty() && creds.password.len() >= 8);
+        link.release().await;
     }
 }

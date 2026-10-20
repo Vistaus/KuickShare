@@ -1710,4 +1710,23 @@ mod tests {
             .expect("the first half of the prefix was lost");
         assert!(handled.is_err());
     }
+
+    /// The phone may send keep-alives while it thinks; only `MAX_HANDSHAKE_KEEP_ALIVES` are accepted.
+    #[tokio::test]
+    async fn handshake_keep_alives_are_capped() {
+        let (mut peer, ours) = tokio::io::duplex(4096);
+        let (bus, _rx) = tokio::sync::broadcast::channel(8);
+        let mut req = InboundRequest::new_over(MigratableStream::Duplex(ours), "id".into(), bus);
+        req.state.state = TransferState::ReceivedUkeyClientFinish;
+
+        for n in 1..=crate::utils::MAX_HANDSHAKE_KEEP_ALIVES {
+            crate::upgrade::tests::write_plain_keep_alive(&mut peer).await;
+            req.handle()
+                .await
+                .unwrap_or_else(|e| panic!("keep-alive {n} was refused: {e}"));
+        }
+        crate::upgrade::tests::write_plain_keep_alive(&mut peer).await;
+        let err = req.handle().await.unwrap_err();
+        assert!(err.to_string().contains("only sent keep-alives"), "{err}");
+    }
 }

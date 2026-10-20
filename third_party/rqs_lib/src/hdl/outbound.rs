@@ -1716,4 +1716,36 @@ mod tests {
         let reply = upgrade::read_plain_frame(&mut peer).await.unwrap();
         crate::upgrade::tests::assert_keep_alive_ack(&reply);
     }
+
+    /// The phone may send keep-alives while it thinks; only `MAX_HANDSHAKE_KEEP_ALIVES` are accepted.
+    #[tokio::test]
+    async fn handshake_keep_alives_are_capped() {
+        let (mut peer, ours) = tokio::io::duplex(4096);
+        let (bus, _rx) = tokio::sync::broadcast::channel(8);
+        let mut req = OutboundRequest::new_over(
+            *b"SEND",
+            MigratableStream::Duplex(ours),
+            "id".into(),
+            bus,
+            OutboundPayload::Text {
+                text: "x".into(),
+                text_type: TextPayloadType::Text,
+            },
+            RemoteDeviceInfo {
+                device_type: crate::DeviceType::Unknown,
+                name: "test".into(),
+            },
+        );
+        req.state.state = TransferState::SentUkeyClientFinish;
+
+        for n in 1..=crate::utils::MAX_HANDSHAKE_KEEP_ALIVES {
+            crate::upgrade::tests::write_plain_keep_alive(&mut peer).await;
+            req.handle()
+                .await
+                .unwrap_or_else(|e| panic!("keep-alive {n} was refused: {e}"));
+        }
+        crate::upgrade::tests::write_plain_keep_alive(&mut peer).await;
+        let err = req.handle().await.unwrap_err();
+        assert!(err.to_string().contains("only sent keep-alives"), "{err}");
+    }
 }
