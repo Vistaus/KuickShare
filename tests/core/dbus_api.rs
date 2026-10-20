@@ -190,6 +190,7 @@ async fn starts_with_the_default_settings() {
     assert!(daemon.get::<bool>("TrayIcon").await);
     assert!(daemon.get::<bool>("DolphinIntegration").await);
     assert!(daemon.get::<bool>("TrustedDevicesEnabled").await);
+    assert!(!daemon.get::<bool>("WifiUpgrade").await);
     assert_eq!(daemon.get::<u32>("HistoryKeepDays").await, 0);
     assert_eq!(daemon.json("History").await, serde_json::json!([]));
     assert_eq!(daemon.json("AllowedDevices").await, serde_json::json!([]));
@@ -223,11 +224,14 @@ async fn integration_settings_are_applied_and_saved() {
     assert!(!daemon.get::<bool>("TrayIcon").await);
     assert!(!daemon.get::<bool>("DolphinIntegration").await);
     assert!(!daemon.get::<bool>("TrustedDevicesEnabled").await);
+    daemon.set("WifiUpgrade", Variant::from(true)).await;
+    assert!(daemon.get::<bool>("WifiUpgrade").await);
     let saved: serde_json::Value =
         serde_json::from_str(&daemon.file("config/kuickshare/settings.json")).unwrap();
     assert_eq!(saved["tray_icon"], false);
     assert_eq!(saved["dolphin_integration"], false);
     assert_eq!(saved["trusted_devices"], false);
+    assert_eq!(saved["wifi_upgrade"], true);
 }
 
 #[tokio::test]

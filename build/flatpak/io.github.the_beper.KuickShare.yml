@@ -16,6 +16,8 @@ finish-args:
   - --own-name=org.kde.kuickshare
   # Bluetooth is used to find devices.
   - --system-talk-name=org.bluez
+  # Wi-Fi upgrade: hotspot and join through NetworkManager (off unless enabled in the settings).
+  - --system-talk-name=org.freedesktop.NetworkManager
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.kde.JobViewServer

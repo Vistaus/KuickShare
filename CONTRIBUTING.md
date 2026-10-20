@@ -7,7 +7,7 @@ KuickShare targets KDE Plasma 6: the AppImage and the Flatpak any distribution, 
 | Path | Content |
 |---|---|
 | `Cargo.toml`, `Cargo.lock` | Rust project (root) |
-| `src/core/` | Daemon `kuickshared`: Quick Share protocol ([`rqs_lib`](https://github.com/nozwock/rquickshare), pinned rev), settings, D-Bus API. Its unit tests sit next to the code |
+| `src/core/` | Daemon `kuickshared`: Quick Share protocol (uses [`third_party/rqs_lib`](THIRD_PARTY.md#changes-to-rqs_lib), a modified copy of rquickshare), settings, D-Bus API. Its unit tests sit next to the code |
 | `src/shell/` | C++ and QML app `kuickshare` (Qt 6, KF6, Kirigami), with its CMake project |
 | `tests/core/` | Rust integration tests; they start the daemon on a private D-Bus |
 | `tests/shell/` | Qt tests: transfer model, Dolphin menu entry, `Exec` quoting, Flatpak and AppImage launcher paths, first-launch integration |

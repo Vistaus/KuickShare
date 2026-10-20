@@ -1,0 +1,1707 @@
+//! `WifiLink` on top of NetworkManager's D-Bus API.
+//!
+//! Hosting creates an AP-mode WPA2 profile plus our DHCP server; joining
+//! connects to the phone's network as a client. All NetworkManager access goes
+//! through the small `NmApi` trait so tests can fake it. The Wi-Fi key only
+//! travels over D-Bus (never in a command line).
+//!
+//! Flatpak: no `nmcli` is needed; the sandbox only needs
+//! `--system-talk-name=org.freedesktop.NetworkManager`.
+
+use std::{
+    io,
+    net::Ipv4Addr,
+    time::{Duration, Instant},
+};
+
+use rand::{Rng, distr::Alphanumeric};
+use rqs_lib::upgrade::{BoxFuture, WifiCredentials, WifiLink};
+use tokio::{
+    sync::{Mutex, MutexGuard},
+    task::JoinHandle,
+    time::sleep,
+};
+
+use crate::dhcp::{self, DhcpConfig};
+
+const AP_PROFILE: &str = "kuickshare-ap";
+const JOIN_PROFILE: &str = "kuickshare-join";
+/// Every profile we create starts with this; used to sweep leftovers.
+const PROFILE_PREFIX: &str = "kuickshare-";
+
+// A fixed subnet can clash with a local network that uses 192.168.49.0/24.
+const GATEWAY: Ipv4Addr = Ipv4Addr::new(192, 168, 49, 1);
+const DHCP: DhcpConfig = DhcpConfig {
+    server_ip: GATEWAY,
+    client_ip: Ipv4Addr::new(192, 168, 49, 2),
+    netmask: Ipv4Addr::new(255, 255, 255, 0),
+    lease_secs: 3600,
+};
+
+/// The phone accepts a join attempt for only ~4-5 s, so a few short attempts.
+const JOIN_ATTEMPTS: u32 = 4;
+const JOIN_BUDGET: Duration = Duration::from_secs(15);
+const JOIN_RETRY_DELAY: Duration = Duration::from_secs(1);
+/// Attempts before the SSID is also tried as hidden.
+const HIDDEN_AFTER: u32 = 2;
+/// Per attempt: scan results are polled this many times, `AP_POLL_DELAY` apart.
+const AP_POLLS: u32 = 6;
+const AP_POLL_DELAY: Duration = Duration::from_millis(500);
+/// Polls for the IPv4 address after the connection is up.
+const IP_POLLS: u32 = 5;
+const ACTIVATE_AP_TIMEOUT: Duration = Duration::from_secs(10);
+const ACTIVATE_JOIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+const MIN_PSK: usize = 8;
+const MAX_PSK: usize = 63;
+const MAX_SSID: usize = 32;
+/// 32 alphanumerics are ~190 bits, far out of reach of an offline attack on the handshake.
+const PSK_LEN: usize = 32;
+
+#[derive(Clone, Copy, Debug)]
+pub struct Band {
+    nm_name: &'static str,
+    channel: u32,
+    mhz: u32,
+}
+
+const BAND_5GHZ: Band = Band {
+    nm_name: "a",
+    channel: 36,
+    mhz: 5180,
+};
+const BAND_2GHZ: Band = Band {
+    nm_name: "bg",
+    channel: 6,
+    mhz: 2437,
+};
+
+// ---------------------------------------------------------------------------
+// Connection settings (what is sent to NetworkManager)
+// ---------------------------------------------------------------------------
+
+/// Wi-Fi key that never shows up in `Debug` output.
+#[derive(Clone)]
+struct Secret(String);
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(<redacted>)")
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Kind {
+    Ap(Band),
+    Client { hidden: bool },
+}
+
+#[derive(Clone, Debug)]
+pub struct ConnSettings {
+    id: &'static str,
+    iface: String,
+    ssid: Vec<u8>,
+    psk: Secret,
+    kind: Kind,
+}
+
+fn invalid(msg: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, msg)
+}
+
+impl ConnSettings {
+    /// Rejects an SSID or key WPA2 cannot carry (the error never quotes either).
+    fn new(id: &'static str, iface: &str, ssid: &str, psk: &str, kind: Kind) -> io::Result<Self> {
+        if ssid.is_empty() || ssid.len() > MAX_SSID {
+            return Err(invalid("Wi-Fi SSID must be 1..=32 bytes"));
+        }
+        if !(MIN_PSK..=MAX_PSK).contains(&psk.len()) {
+            return Err(invalid("Wi-Fi key must be 8..=63 bytes"));
+        }
+        Ok(Self {
+            id,
+            iface: iface.to_owned(),
+            ssid: ssid.as_bytes().to_vec(),
+            psk: Secret(psk.to_owned()),
+            kind,
+        })
+    }
+}
+
+mod wire {
+    use std::collections::HashMap;
+
+    use zbus::Variant;
+
+    use super::{ConnSettings, GATEWAY, Kind};
+
+    pub type Dict = HashMap<&'static str, HashMap<&'static str, Variant<'static>>>;
+
+    fn section<const N: usize>(
+        entries: [(&'static str, Variant<'static>); N],
+    ) -> HashMap<&'static str, Variant<'static>> {
+        entries.into_iter().collect()
+    }
+
+    fn strings(items: &[&str]) -> Variant<'static> {
+        Variant::from(items.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>())
+    }
+
+    /// The `a{sa{sv}}` argument of `AddAndActivateConnection2`.
+    pub fn dict(s: &ConnSettings) -> Dict {
+        let mut conn = vec![
+            ("id", Variant::from(s.id)),
+            ("type", Variant::from("802-11-wireless")),
+            ("autoconnect", Variant::from(false)),
+            ("interface-name", Variant::from(s.iface.clone())),
+        ];
+        let mut wireless = vec![("ssid", Variant::from(s.ssid.clone()))];
+        let mut security = vec![
+            ("key-mgmt", Variant::from("wpa-psk")),
+            ("psk", Variant::from(s.psk.0.clone())),
+        ];
+        let (ipv4, ipv6);
+        match s.kind {
+            Kind::Ap(band) => {
+                // TODO(privileges phase): "trusted" opens every port to the group's
+                // client; replace with a narrower firewall rule (upgrade port + DHCP).
+                conn.push(("zone", Variant::from("trusted")));
+                wireless.extend([
+                    ("mode", Variant::from("ap")),
+                    ("band", Variant::from(band.nm_name)),
+                    ("channel", Variant::from(band.channel)),
+                ]);
+                security.extend([
+                    ("proto", strings(&["rsn"])),
+                    ("pairwise", strings(&["ccmp"])),
+                    ("group", strings(&["ccmp"])),
+                ]);
+                let address = section([
+                    ("address", Variant::from(GATEWAY.to_string())),
+                    ("prefix", Variant::from(24u32)),
+                ]);
+                ipv4 = section([
+                    ("method", Variant::from("manual")),
+                    ("address-data", Variant::from(vec![address])),
+                ]);
+                ipv6 = section([("method", Variant::from("disabled"))]);
+            }
+            Kind::Client { hidden } => {
+                wireless.extend([
+                    ("mode", Variant::from("infrastructure")),
+                    ("hidden", Variant::from(hidden)),
+                ]);
+                // The AP is not trusted: it must not provide the default route or DNS.
+                ipv4 = section([
+                    ("method", Variant::from("auto")),
+                    ("never-default", Variant::from(true)),
+                    ("ignore-auto-dns", Variant::from(true)),
+                ]);
+                ipv6 = section([("method", Variant::from("disabled"))]);
+            }
+        }
+        HashMap::from([
+            ("connection", conn.into_iter().collect()),
+            ("802-11-wireless", wireless.into_iter().collect()),
+            ("802-11-wireless-security", security.into_iter().collect()),
+            ("ipv4", ipv4),
+            ("ipv6", ipv6),
+        ])
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NetworkManager access
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WifiDevice {
+    /// D-Bus object path.
+    path: String,
+    iface: String,
+}
+
+/// A profile added by `add_and_activate` and its active connection (object paths).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Created {
+    settings: String,
+    active: String,
+}
+
+/// The NetworkManager operations `NmLink` needs. Objects are D-Bus paths.
+pub trait NmApi: Send + Sync {
+    /// First Wi-Fi (not Wi-Fi P2P) device.
+    fn wifi_device(&self) -> impl Future<Output = io::Result<WifiDevice>> + Send;
+    /// Settings objects whose id starts with `kuickshare-`.
+    fn stale_profiles(&self) -> impl Future<Output = io::Result<Vec<String>>> + Send;
+    /// Settings object of the connection active on the device, if any.
+    fn current_profile(
+        &self,
+        dev: &WifiDevice,
+    ) -> impl Future<Output = io::Result<Option<String>>> + Send;
+    /// Adds the profile and starts activating it, pinned to `ap` when given.
+    fn add_and_activate(
+        &self,
+        dev: &WifiDevice,
+        ap: Option<&str>,
+        settings: &ConnSettings,
+    ) -> impl Future<Output = io::Result<Created>> + Send;
+    /// Waits until the active connection is ACTIVATED; errors if it fails or times out.
+    fn wait_activated(
+        &self,
+        active: &str,
+        timeout: Duration,
+    ) -> impl Future<Output = io::Result<()>> + Send;
+    fn request_scan(&self, dev: &WifiDevice) -> impl Future<Output = io::Result<()>> + Send;
+    /// Access point currently visible with exactly this SSID.
+    fn find_ap(
+        &self,
+        dev: &WifiDevice,
+        ssid: &[u8],
+    ) -> impl Future<Output = io::Result<Option<String>>> + Send;
+    fn ipv4(&self, dev: &WifiDevice) -> impl Future<Output = io::Result<Option<Ipv4Addr>>> + Send;
+    fn deactivate(&self, active: &str) -> impl Future<Output = io::Result<()>> + Send;
+    fn delete(&self, settings: &str) -> impl Future<Output = io::Result<()>> + Send;
+    /// Activates an existing profile on the device.
+    fn activate(
+        &self,
+        dev: &WifiDevice,
+        settings: &str,
+    ) -> impl Future<Output = io::Result<()>> + Send;
+}
+
+mod proxies {
+    use std::collections::HashMap;
+
+    use zbus::{ObjectPath, OwnedObjectPath, OwnedVariant, Variant, proxy};
+
+    #[proxy(
+        interface = "org.freedesktop.NetworkManager",
+        default_service = "org.freedesktop.NetworkManager",
+        default_path = "/org/freedesktop/NetworkManager"
+    )]
+    pub trait Manager {
+        fn get_devices(&self) -> zbus::Result<Vec<OwnedObjectPath>>;
+
+        fn add_and_activate_connection2(
+            &self,
+            connection: HashMap<&str, HashMap<&str, Variant<'_>>>,
+            device: &ObjectPath<'_>,
+            specific_object: &ObjectPath<'_>,
+            options: HashMap<&str, Variant<'_>>,
+        ) -> zbus::Result<(
+            OwnedObjectPath,
+            OwnedObjectPath,
+            HashMap<String, OwnedVariant>,
+        )>;
+
+        fn activate_connection(
+            &self,
+            connection: &ObjectPath<'_>,
+            device: &ObjectPath<'_>,
+            specific_object: &ObjectPath<'_>,
+        ) -> zbus::Result<OwnedObjectPath>;
+
+        fn deactivate_connection(&self, active_connection: &ObjectPath<'_>) -> zbus::Result<()>;
+    }
+
+    #[proxy(
+        interface = "org.freedesktop.NetworkManager.Settings",
+        default_service = "org.freedesktop.NetworkManager",
+        default_path = "/org/freedesktop/NetworkManager/Settings"
+    )]
+    pub trait Settings {
+        fn list_connections(&self) -> zbus::Result<Vec<OwnedObjectPath>>;
+    }
+
+    #[proxy(
+        interface = "org.freedesktop.NetworkManager.Settings.Connection",
+        default_service = "org.freedesktop.NetworkManager"
+    )]
+    pub trait Profile {
+        fn get_settings(&self) -> zbus::Result<HashMap<String, HashMap<String, OwnedVariant>>>;
+        fn delete(&self) -> zbus::Result<()>;
+    }
+
+    #[proxy(
+        interface = "org.freedesktop.NetworkManager.Connection.Active",
+        default_service = "org.freedesktop.NetworkManager"
+    )]
+    pub trait ActiveConn {
+        /// Named apart from the `StateChanged` signal's stream.
+        #[zbus(property, name = "State")]
+        fn current_state(&self) -> zbus::Result<u32>;
+
+        #[zbus(signal)]
+        fn state_changed(&self, state: u32, reason: u32) -> zbus::Result<()>;
+    }
+
+    #[proxy(
+        interface = "org.freedesktop.NetworkManager.Device",
+        default_service = "org.freedesktop.NetworkManager"
+    )]
+    pub trait Device {
+        #[zbus(property)]
+        fn device_type(&self) -> zbus::Result<u32>;
+        #[zbus(property)]
+        fn interface(&self) -> zbus::Result<String>;
+        #[zbus(property)]
+        fn active_connection(&self) -> zbus::Result<OwnedObjectPath>;
+        #[zbus(property)]
+        fn ip4_config(&self) -> zbus::Result<OwnedObjectPath>;
+    }
+
+    #[proxy(
+        interface = "org.freedesktop.NetworkManager.Device.Wireless",
+        default_service = "org.freedesktop.NetworkManager"
+    )]
+    pub trait Wireless {
+        fn request_scan(&self, options: HashMap<&str, Variant<'_>>) -> zbus::Result<()>;
+        #[zbus(property)]
+        fn access_points(&self) -> zbus::Result<Vec<OwnedObjectPath>>;
+    }
+
+    #[proxy(
+        interface = "org.freedesktop.NetworkManager.AccessPoint",
+        default_service = "org.freedesktop.NetworkManager"
+    )]
+    pub trait AccessPoint {
+        #[zbus(property)]
+        fn ssid(&self) -> zbus::Result<Vec<u8>>;
+    }
+
+    #[proxy(
+        interface = "org.freedesktop.NetworkManager.IP4Config",
+        default_service = "org.freedesktop.NetworkManager"
+    )]
+    pub trait Ip4Config {
+        #[zbus(property)]
+        fn address_data(&self) -> zbus::Result<Vec<HashMap<String, OwnedVariant>>>;
+    }
+}
+
+use proxies::*;
+use zbus::{Connection, ObjectPath, proxy::CacheProperties};
+
+/// NM_DEVICE_TYPE_WIFI
+const DEVICE_TYPE_WIFI: u32 = 2;
+/// NM_ACTIVE_CONNECTION_STATE_ACTIVATED / _DEACTIVATED
+const STATE_ACTIVATED: u32 = 2;
+const STATE_DEACTIVATED: u32 = 4;
+const NO_OBJECT: &str = "/";
+
+fn io_err(e: impl std::fmt::Display) -> io::Error {
+    io::Error::other(format!("NetworkManager: {e}"))
+}
+
+fn path(p: &str) -> zbus::Result<ObjectPath<'_>> {
+    ObjectPath::try_from(p)
+}
+
+/// Real implementation on the system bus.
+pub struct DbusNm {
+    conn: tokio::sync::OnceCell<Connection>,
+}
+
+macro_rules! proxy_at {
+    ($proxy:ident, $c:expr, $path:expr) => {
+        $proxy::builder($c)
+            .path($path)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await?
+    };
+}
+
+impl DbusNm {
+    fn new() -> Self {
+        Self {
+            conn: tokio::sync::OnceCell::new(),
+        }
+    }
+
+    async fn conn(&self) -> zbus::Result<&Connection> {
+        self.conn.get_or_try_init(Connection::system).await
+    }
+
+    async fn wifi_device_z(&self) -> zbus::Result<Option<WifiDevice>> {
+        let c = self.conn().await?;
+        for p in ManagerProxy::new(c).await?.get_devices().await? {
+            let dev = proxy_at!(DeviceProxy, c, p.as_str());
+            if dev.device_type().await? == DEVICE_TYPE_WIFI {
+                return Ok(Some(WifiDevice {
+                    path: p.to_string(),
+                    iface: dev.interface().await?,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn stale_profiles_z(&self) -> zbus::Result<Vec<String>> {
+        let c = self.conn().await?;
+        let mut stale = Vec::new();
+        for p in SettingsProxy::new(c).await?.list_connections().await? {
+            let profile = proxy_at!(ProfileProxy, c, p.as_str());
+            let mut settings = match profile.get_settings().await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::debug!("skipping unreadable profile {p}: {e}");
+                    continue;
+                }
+            };
+            let id = settings
+                .remove("connection")
+                .and_then(|mut s| s.remove("id"))
+                .and_then(|v| String::try_from(v).ok());
+            if id.is_some_and(|id| id.starts_with(PROFILE_PREFIX)) {
+                stale.push(p.to_string());
+            }
+        }
+        Ok(stale)
+    }
+
+    async fn current_profile_z(&self, dev: &WifiDevice) -> zbus::Result<Option<String>> {
+        let c = self.conn().await?;
+        let active = proxy_at!(DeviceProxy, c, dev.path.as_str())
+            .active_connection()
+            .await?;
+        if active.as_str() == NO_OBJECT {
+            return Ok(None);
+        }
+        let profile = proxy_at!(ActiveConnProxy, c, active.as_str())
+            .inner()
+            .get_property::<zbus::OwnedObjectPath>("Connection")
+            .await?;
+        Ok(Some(profile.to_string()))
+    }
+
+    async fn add_and_activate_z(
+        &self,
+        dev: &WifiDevice,
+        ap: Option<&str>,
+        settings: &ConnSettings,
+    ) -> zbus::Result<Created> {
+        let c = self.conn().await?;
+        let dict = wire::dict(settings)
+            .into_iter()
+            .map(|(k, v)| (k, v.into_iter().collect()))
+            .collect();
+        // "memory": the profile (and the key) is never written to disk.
+        let options = [("persist", "memory".into())].into_iter().collect();
+        let (settings, active, _) = ManagerProxy::new(c)
+            .await?
+            .add_and_activate_connection2(
+                dict,
+                &path(&dev.path)?,
+                &path(ap.unwrap_or(NO_OBJECT))?,
+                options,
+            )
+            .await?;
+        Ok(Created {
+            settings: settings.to_string(),
+            active: active.to_string(),
+        })
+    }
+
+    async fn wait_activated_z(&self, active: &str, limit: Duration) -> zbus::Result<()> {
+        use futures_util::StreamExt;
+
+        let c = self.conn().await?;
+        let conn = proxy_at!(ActiveConnProxy, c, active);
+        // Subscribe first, then read the current state: no transition is missed.
+        let mut changes = conn.receive_state_changed().await?;
+        let mut state = conn.current_state().await?;
+        let wait = async {
+            loop {
+                match state {
+                    STATE_ACTIVATED => return Ok(()),
+                    STATE_DEACTIVATED => {
+                        return Err(zbus::Error::Failure("connection was deactivated".into()));
+                    }
+                    _ => {}
+                }
+                let Some(signal) = changes.next().await else {
+                    return Err(zbus::Error::Failure("signal stream ended".into()));
+                };
+                state = signal.args()?.state;
+            }
+        };
+        tokio::time::timeout(limit, wait)
+            .await
+            .unwrap_or_else(|_| Err(zbus::Error::Failure("activation timed out".into())))
+    }
+
+    async fn find_ap_z(&self, dev: &WifiDevice, ssid: &[u8]) -> zbus::Result<Option<String>> {
+        let c = self.conn().await?;
+        let wireless = proxy_at!(WirelessProxy, c, dev.path.as_str());
+        for p in wireless.access_points().await? {
+            let ap = proxy_at!(AccessPointProxy, c, p.as_str());
+            // An AP can vanish between the listing and this read.
+            if ap.ssid().await.is_ok_and(|s| s == ssid) {
+                return Ok(Some(p.to_string()));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn ipv4_z(&self, dev: &WifiDevice) -> zbus::Result<Option<Ipv4Addr>> {
+        let c = self.conn().await?;
+        let cfg = proxy_at!(DeviceProxy, c, dev.path.as_str())
+            .ip4_config()
+            .await?;
+        if cfg.as_str() == NO_OBJECT {
+            return Ok(None);
+        }
+        for mut entry in proxy_at!(Ip4ConfigProxy, c, cfg.as_str())
+            .address_data()
+            .await?
+        {
+            let ip = entry
+                .remove("address")
+                .and_then(|v| String::try_from(v).ok())
+                .and_then(|s| s.parse().ok());
+            if ip.is_some() {
+                return Ok(ip);
+            }
+        }
+        Ok(None)
+    }
+}
+
+impl NmApi for DbusNm {
+    async fn wifi_device(&self) -> io::Result<WifiDevice> {
+        self.wifi_device_z()
+            .await
+            .map_err(io_err)?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no Wi-Fi device found"))
+    }
+
+    async fn stale_profiles(&self) -> io::Result<Vec<String>> {
+        self.stale_profiles_z().await.map_err(io_err)
+    }
+
+    async fn current_profile(&self, dev: &WifiDevice) -> io::Result<Option<String>> {
+        self.current_profile_z(dev).await.map_err(io_err)
+    }
+
+    async fn add_and_activate(
+        &self,
+        dev: &WifiDevice,
+        ap: Option<&str>,
+        settings: &ConnSettings,
+    ) -> io::Result<Created> {
+        self.add_and_activate_z(dev, ap, settings)
+            .await
+            .map_err(io_err)
+    }
+
+    async fn wait_activated(&self, active: &str, timeout: Duration) -> io::Result<()> {
+        self.wait_activated_z(active, timeout).await.map_err(io_err)
+    }
+
+    async fn request_scan(&self, dev: &WifiDevice) -> io::Result<()> {
+        async {
+            let c = self.conn().await?;
+            proxy_at!(WirelessProxy, c, dev.path.as_str())
+                .request_scan(Default::default())
+                .await
+        }
+        .await
+        .map_err(io_err)
+    }
+
+    async fn find_ap(&self, dev: &WifiDevice, ssid: &[u8]) -> io::Result<Option<String>> {
+        self.find_ap_z(dev, ssid).await.map_err(io_err)
+    }
+
+    async fn ipv4(&self, dev: &WifiDevice) -> io::Result<Option<Ipv4Addr>> {
+        self.ipv4_z(dev).await.map_err(io_err)
+    }
+
+    async fn deactivate(&self, active: &str) -> io::Result<()> {
+        async {
+            let c = self.conn().await?;
+            ManagerProxy::new(c)
+                .await?
+                .deactivate_connection(&path(active)?)
+                .await
+        }
+        .await
+        .map_err(io_err)
+    }
+
+    async fn delete(&self, settings: &str) -> io::Result<()> {
+        async {
+            let c = self.conn().await?;
+            proxy_at!(ProfileProxy, c, settings).delete().await
+        }
+        .await
+        .map_err(io_err)
+    }
+
+    async fn activate(&self, dev: &WifiDevice, settings: &str) -> io::Result<()> {
+        async {
+            let c = self.conn().await?;
+            ManagerProxy::new(c)
+                .await?
+                .activate_connection(&path(settings)?, &path(&dev.path)?, &path(NO_OBJECT)?)
+                .await
+                .map(drop)
+        }
+        .await
+        .map_err(io_err)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The link
+// ---------------------------------------------------------------------------
+
+type DhcpStarter = Box<dyn Fn(&str) -> io::Result<JoinHandle<()>> + Send + Sync>;
+
+/// Checks that port 67 can be bound on `iface`, then releases it.
+type DhcpProbe = Box<dyn Fn(&str) -> io::Result<()> + Send + Sync>;
+
+fn probe_dhcp(iface: &str) -> io::Result<()> {
+    dhcp::bind(iface).map(drop)
+}
+
+fn start_dhcp(iface: &str) -> io::Result<JoinHandle<()>> {
+    let socket = dhcp::bind(iface)?;
+    let iface = iface.to_owned();
+    Ok(tokio::spawn(async move {
+        if let Err(e) = dhcp::serve(socket, &iface, DHCP).await {
+            tracing::warn!("DHCP server stopped: {e}");
+        }
+    }))
+}
+
+struct Timing {
+    retry_delay: Duration,
+    poll_delay: Duration,
+    budget: Duration,
+}
+
+/// What `host` or `join` set up. Empty (default) means the link is free.
+#[derive(Default)]
+struct State {
+    busy: bool,
+    dev: Option<WifiDevice>,
+    /// Profile added by us and not yet removed.
+    created: Option<Created>,
+    /// Profile the device had active before we took it over.
+    previous: Option<String>,
+    /// Set before the first profile is sent to NetworkManager.
+    touched: bool,
+    dhcp: Option<JoinHandle<()>>,
+}
+
+pub struct NmLink<A = DbusNm> {
+    api: A,
+    probe_dhcp: DhcpProbe,
+    start_dhcp: DhcpStarter,
+    timing: Timing,
+    state: Mutex<State>,
+}
+
+impl NmLink {
+    pub fn new() -> Self {
+        Self::with_parts(
+            DbusNm::new(),
+            Box::new(probe_dhcp),
+            Box::new(start_dhcp),
+            Timing {
+                retry_delay: JOIN_RETRY_DELAY,
+                poll_delay: AP_POLL_DELAY,
+                budget: JOIN_BUDGET,
+            },
+        )
+    }
+}
+
+fn busy() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::WouldBlock,
+        "a Wi-Fi upgrade is already in progress",
+    )
+}
+
+impl<A: NmApi> NmLink<A> {
+    fn with_parts(api: A, probe_dhcp: DhcpProbe, start_dhcp: DhcpStarter, timing: Timing) -> Self {
+        Self {
+            api,
+            probe_dhcp,
+            start_dhcp,
+            timing,
+            state: Mutex::new(State::default()),
+        }
+    }
+
+    /// Claims the link; refuses when another upgrade holds it.
+    fn begin(&self) -> io::Result<MutexGuard<'_, State>> {
+        let mut st = self.state.try_lock().map_err(|_| busy())?;
+        if st.busy {
+            return Err(busy());
+        }
+        st.busy = true;
+        Ok(st)
+    }
+
+    /// Removes leftover `kuickshare-*` profiles (crashed run). Failures are only logged.
+    async fn sweep(&self) {
+        match self.api.stale_profiles().await {
+            Ok(stale) => {
+                for p in stale {
+                    if let Err(e) = self.api.delete(&p).await {
+                        tracing::warn!("could not delete stale profile {p}: {e}");
+                    }
+                }
+            }
+            // Expected when NetworkManager is absent.
+            Err(e) => tracing::debug!("could not list stale profiles: {e}"),
+        }
+    }
+
+    /// For daemon start and shutdown: tears down our own state and sweeps leftovers.
+    pub async fn cleanup_stale(&self) {
+        let mut st = self.state.lock().await;
+        self.teardown(&mut st).await;
+        self.sweep().await;
+    }
+
+    async fn remember_previous(&self, st: &mut State, dev: &WifiDevice) {
+        st.previous = match self.api.current_profile(dev).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("could not read the active connection: {e}");
+                None
+            }
+        };
+    }
+
+    /// Removes the profile in `st.created`, if any. Failures are only logged.
+    async fn drop_created(&self, st: &mut State) {
+        if let Some(c) = st.created.take() {
+            if let Err(e) = self.api.deactivate(&c.active).await {
+                tracing::debug!("deactivate: {e}");
+            }
+            if let Err(e) = self.api.delete(&c.settings).await {
+                tracing::warn!("could not delete profile {}: {e}", c.settings);
+            }
+        }
+    }
+
+    async fn bring_up(
+        &self,
+        st: &mut State,
+        dev: &WifiDevice,
+        ssid: &str,
+        psk: &str,
+        band: Band,
+    ) -> io::Result<()> {
+        let settings = ConnSettings::new(AP_PROFILE, &dev.iface, ssid, psk, Kind::Ap(band))?;
+        st.touched = true;
+        let created = self.api.add_and_activate(dev, None, &settings).await?;
+        st.created = Some(created.clone());
+        self.api
+            .wait_activated(&created.active, ACTIVATE_AP_TIMEOUT)
+            .await
+    }
+
+    async fn host_inner(&self, st: &mut State, port: u16) -> io::Result<WifiCredentials> {
+        let dev = self.api.wifi_device().await?;
+        // Before anything touches the user's Wi-Fi. The socket is released at
+        // once: serving starts only when the AP is up, so the station interface
+        // never answers other hosts' DHCP requests.
+        (self.probe_dhcp)(&dev.iface)?;
+        st.dev = Some(dev.clone());
+        self.sweep().await;
+        self.remember_previous(st, &dev).await;
+
+        let (ssid, password) = (random_ssid(), random_password());
+        let band = match self.bring_up(st, &dev, &ssid, &password, BAND_5GHZ).await {
+            Ok(()) => BAND_5GHZ,
+            Err(e) => {
+                tracing::warn!("5 GHz access point failed ({e}); trying 2.4 GHz");
+                self.drop_created(st).await;
+                self.bring_up(st, &dev, &ssid, &password, BAND_2GHZ).await?;
+                BAND_2GHZ
+            }
+        };
+        st.dhcp = Some((self.start_dhcp)(&dev.iface)?);
+        Ok(WifiCredentials {
+            ssid,
+            password,
+            port,
+            frequency_mhz: band.mhz,
+            gateway: GATEWAY,
+        })
+    }
+
+    /// Looks for the AP in the scan results for a few polls.
+    async fn poll_ap(&self, dev: &WifiDevice, ssid: &[u8]) -> io::Result<Option<String>> {
+        for poll in 0..AP_POLLS {
+            if poll > 0 {
+                sleep(self.timing.poll_delay).await;
+            }
+            if let Some(ap) = self.api.find_ap(dev, ssid).await? {
+                return Ok(Some(ap));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn join_once(
+        &self,
+        st: &mut State,
+        dev: &WifiDevice,
+        creds: &WifiCredentials,
+        may_be_hidden: bool,
+    ) -> io::Result<()> {
+        // Fails when a scan is already running; harmless.
+        let _ = self.api.request_scan(dev).await;
+        let ap = self.poll_ap(dev, creds.ssid.as_bytes()).await?;
+        let hidden = ap.is_none() && may_be_hidden;
+        if ap.is_none() && !hidden {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "the access point was not found",
+            ));
+        }
+        let settings = client_settings(&dev.iface, creds, hidden)?;
+        st.touched = true;
+        let created = self
+            .api
+            .add_and_activate(dev, ap.as_deref(), &settings)
+            .await?;
+        st.created = Some(created.clone());
+        self.api
+            .wait_activated(&created.active, ACTIVATE_JOIN_TIMEOUT)
+            .await
+    }
+
+    async fn join_inner(&self, st: &mut State, creds: &WifiCredentials) -> io::Result<Ipv4Addr> {
+        let dev = self.api.wifi_device().await?;
+        // Validates the SSID and key before anything is touched.
+        client_settings(&dev.iface, creds, false)?;
+        st.dev = Some(dev.clone());
+        self.sweep().await;
+        self.remember_previous(st, &dev).await;
+
+        let start = Instant::now();
+        let mut last_err = None;
+        for attempt in 0..JOIN_ATTEMPTS {
+            if attempt > 0 {
+                sleep(self.timing.retry_delay).await;
+            }
+            match self
+                .join_once(st, &dev, creds, attempt >= HIDDEN_AFTER)
+                .await
+            {
+                Ok(()) => {
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    tracing::debug!("join attempt {} failed: {e}", attempt + 1);
+                    self.drop_created(st).await;
+                    last_err = Some(e);
+                }
+            }
+            if start.elapsed() >= self.timing.budget {
+                break;
+            }
+        }
+        if let Some(e) = last_err {
+            return Err(e);
+        }
+
+        for poll in 0..IP_POLLS {
+            if poll > 0 {
+                sleep(self.timing.poll_delay).await;
+            }
+            if let Some(ip) = self.api.ipv4(&dev).await? {
+                return Ok(ip);
+            }
+        }
+        Err(io::Error::other("no IPv4 address on the Wi-Fi interface"))
+    }
+
+    /// Undoes whatever `st` records and resets it. Failures are only logged.
+    async fn teardown(&self, st: &mut State) {
+        let mut old = std::mem::take(st);
+        if let Some(task) = old.dhcp.take() {
+            task.abort();
+        }
+        self.drop_created(&mut old).await;
+        if let (Some(prev), Some(dev)) = (&old.previous, &old.dev)
+            && (old.touched || self.current_differs(dev, prev).await)
+            && let Err(e) = self.api.activate(dev, prev).await
+        {
+            tracing::warn!("could not restore the previous connection: {e}");
+        }
+    }
+
+    /// Whether the device's active connection is not `previous` (unknown counts as no).
+    async fn current_differs(&self, dev: &WifiDevice, previous: &str) -> bool {
+        match self.api.current_profile(dev).await {
+            Ok(current) => current.as_deref() != Some(previous),
+            Err(e) => {
+                tracing::debug!("could not read the active connection: {e}");
+                false
+            }
+        }
+    }
+}
+
+impl<A: NmApi> WifiLink for NmLink<A> {
+    fn host(&self, port: u16) -> BoxFuture<'_, io::Result<WifiCredentials>> {
+        Box::pin(async move {
+            let mut st = self.begin()?;
+            let result = self.host_inner(&mut st, port).await;
+            if result.is_err() {
+                self.teardown(&mut st).await;
+            }
+            result
+        })
+    }
+
+    fn join<'a>(&'a self, creds: &'a WifiCredentials) -> BoxFuture<'a, io::Result<Ipv4Addr>> {
+        Box::pin(async move {
+            let mut st = self.begin()?;
+            let result = self.join_inner(&mut st, creds).await;
+            if result.is_err() {
+                self.teardown(&mut st).await;
+            }
+            result
+        })
+    }
+
+    fn release(&self) -> BoxFuture<'_, ()> {
+        Box::pin(async move {
+            self.cleanup_stale().await;
+        })
+    }
+}
+
+fn client_settings(iface: &str, creds: &WifiCredentials, hidden: bool) -> io::Result<ConnSettings> {
+    ConnSettings::new(
+        JOIN_PROFILE,
+        iface,
+        &creds.ssid,
+        &creds.password,
+        Kind::Client { hidden },
+    )
+}
+
+/// Looks like a Wi-Fi Direct group name: `DIRECT-xy-KuickShare`.
+fn random_ssid() -> String {
+    format!("DIRECT-{}-KuickShare", random_alnum(2))
+}
+
+fn random_password() -> String {
+    random_alnum(PSK_LEN)
+}
+
+fn random_alnum(len: usize) -> String {
+    rand::rng()
+        .sample_iter(Alphanumeric)
+        .take(len)
+        .map(char::from)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        collections::{BTreeSet, HashMap},
+        sync::{
+            Arc, Mutex as StdMutex,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
+    use zbus::Variant;
+
+    type Fail = Box<dyn Fn(&str, usize) -> Option<io::Error> + Send + Sync>;
+
+    /// Records every call (settings by their redacted `Debug`) and keeps the
+    /// set of profiles that exist. `fail(op, n)` fails the n-th (1-based) call of `op`.
+    struct Fake {
+        log: Arc<StdMutex<Vec<String>>>,
+        counts: StdMutex<HashMap<&'static str, usize>>,
+        live: StdMutex<BTreeSet<String>>,
+        added: StdMutex<Vec<(Option<String>, ConnSettings)>>,
+        fail: Fail,
+        stale: Vec<String>,
+        previous: Option<String>,
+        /// `find_ap` finds the AP from this call on (1-based); 0 = never.
+        ap_from: usize,
+        ip: Option<Ipv4Addr>,
+    }
+
+    impl Fake {
+        fn step(&self, op: &'static str, detail: &str) -> io::Result<()> {
+            self.log.lock().unwrap().push(format!("{op} {detail}"));
+            let n = {
+                let mut counts = self.counts.lock().unwrap();
+                let n = counts.entry(op).or_default();
+                *n += 1;
+                *n
+            };
+            (self.fail)(op, n).map_or(Ok(()), Err)
+        }
+    }
+
+    impl NmApi for Fake {
+        async fn wifi_device(&self) -> io::Result<WifiDevice> {
+            self.step("wifi_device", "")?;
+            Ok(WifiDevice {
+                path: "/dev/1".into(),
+                iface: "wlan0".into(),
+            })
+        }
+        async fn stale_profiles(&self) -> io::Result<Vec<String>> {
+            self.step("stale_profiles", "")?;
+            Ok(self.stale.clone())
+        }
+        async fn current_profile(&self, _: &WifiDevice) -> io::Result<Option<String>> {
+            self.step("current_profile", "")?;
+            Ok(self.previous.clone())
+        }
+        async fn add_and_activate(
+            &self,
+            _: &WifiDevice,
+            ap: Option<&str>,
+            s: &ConnSettings,
+        ) -> io::Result<Created> {
+            self.step("add_and_activate", &format!("{ap:?} {s:?}"))?;
+            let n = self.added.lock().unwrap().len() + 1;
+            self.added
+                .lock()
+                .unwrap()
+                .push((ap.map(str::to_owned), s.clone()));
+            let created = Created {
+                settings: format!("/set/{n}"),
+                active: format!("/act/{n}"),
+            };
+            self.live.lock().unwrap().insert(created.settings.clone());
+            Ok(created)
+        }
+        async fn wait_activated(&self, active: &str, _: Duration) -> io::Result<()> {
+            self.step("wait_activated", active)
+        }
+        async fn request_scan(&self, _: &WifiDevice) -> io::Result<()> {
+            self.step("request_scan", "")
+        }
+        async fn find_ap(&self, _: &WifiDevice, _: &[u8]) -> io::Result<Option<String>> {
+            self.step("find_ap", "")?;
+            let n = self.counts.lock().unwrap()["find_ap"];
+            Ok((self.ap_from != 0 && n >= self.ap_from).then(|| "/ap/1".to_owned()))
+        }
+        async fn ipv4(&self, _: &WifiDevice) -> io::Result<Option<Ipv4Addr>> {
+            self.step("ipv4", "")?;
+            Ok(self.ip)
+        }
+        async fn deactivate(&self, active: &str) -> io::Result<()> {
+            self.step("deactivate", active)
+        }
+        async fn delete(&self, settings: &str) -> io::Result<()> {
+            self.step("delete", settings)?;
+            self.live.lock().unwrap().remove(settings);
+            Ok(())
+        }
+        async fn activate(&self, _: &WifiDevice, settings: &str) -> io::Result<()> {
+            self.step("activate", settings)
+        }
+    }
+
+    struct Builder {
+        fail: Fail,
+        stale: Vec<String>,
+        previous: Option<String>,
+        ap_from: usize,
+        budget: Duration,
+    }
+
+    fn fake() -> Builder {
+        Builder {
+            fail: Box::new(|_, _| None),
+            stale: vec![],
+            previous: Some("/prev/home".into()),
+            ap_from: 1,
+            budget: Duration::from_secs(60),
+        }
+    }
+
+    impl Builder {
+        fn fail(mut self, f: impl Fn(&str, usize) -> bool + Send + Sync + 'static) -> Self {
+            self.fail = Box::new(move |op, n| f(op, n).then(|| io::Error::other("boom")));
+            self
+        }
+
+        fn build(self) -> (NmLink<Fake>, Arc<StdMutex<Vec<String>>>, Arc<AtomicBool>) {
+            self.build_with(true)
+        }
+
+        fn build_with(
+            self,
+            dhcp_ok: bool,
+        ) -> (NmLink<Fake>, Arc<StdMutex<Vec<String>>>, Arc<AtomicBool>) {
+            let log = Arc::new(StdMutex::default());
+            let dhcp_alive = Arc::new(AtomicBool::new(false));
+            let api = Fake {
+                log: log.clone(),
+                counts: StdMutex::default(),
+                live: StdMutex::default(),
+                added: StdMutex::default(),
+                fail: self.fail,
+                stale: self.stale,
+                previous: self.previous,
+                ap_from: self.ap_from,
+                ip: Some(Ipv4Addr::new(192, 168, 49, 7)),
+            };
+            let (l, alive) = (log.clone(), dhcp_alive.clone());
+            let l2 = log.clone();
+            let probe: DhcpProbe = Box::new(move |iface| {
+                l2.lock().unwrap().push(format!("dhcp_probe {iface}"));
+                if !dhcp_ok {
+                    return Err(io::Error::other("port 67 busy"));
+                }
+                Ok(())
+            });
+            let starter: DhcpStarter = Box::new(move |iface| {
+                l.lock().unwrap().push(format!("dhcp_bind {iface}"));
+                struct Guard(Arc<AtomicBool>);
+                impl Drop for Guard {
+                    fn drop(&mut self) {
+                        self.0.store(false, Ordering::SeqCst);
+                    }
+                }
+                alive.store(true, Ordering::SeqCst);
+                let guard = Guard(alive.clone());
+                Ok(tokio::spawn(async move {
+                    let _guard = guard;
+                    std::future::pending::<()>().await
+                }))
+            });
+            let timing = Timing {
+                retry_delay: Duration::ZERO,
+                poll_delay: Duration::ZERO,
+                budget: self.budget,
+            };
+            (
+                NmLink::with_parts(api, probe, starter, timing),
+                log,
+                dhcp_alive,
+            )
+        }
+    }
+
+    fn calls(log: &Arc<StdMutex<Vec<String>>>) -> Vec<String> {
+        log.lock().unwrap().clone()
+    }
+
+    /// Calls recorded so far, not counting the read-only stale-profile listing.
+    fn quiet_len(log: &Arc<StdMutex<Vec<String>>>) -> usize {
+        calls(log)
+            .iter()
+            .filter(|c| !c.starts_with("stale_profiles"))
+            .count()
+    }
+
+    fn count(log: &Arc<StdMutex<Vec<String>>>, prefix: &str) -> usize {
+        calls(log).iter().filter(|c| c.starts_with(prefix)).count()
+    }
+
+    fn position(log: &Arc<StdMutex<Vec<String>>>, prefix: &str) -> usize {
+        calls(log)
+            .iter()
+            .position(|c| c.starts_with(prefix))
+            .unwrap_or_else(|| panic!("no call {prefix}"))
+    }
+
+    fn live(link: &NmLink<Fake>) -> usize {
+        link.api.live.lock().unwrap().len()
+    }
+
+    fn creds() -> WifiCredentials {
+        WifiCredentials {
+            ssid: "DIRECT-ab-Pixel; $(x) `y`".into(),
+            password: "pa ss'w\"d-from-the-phone".into(),
+            port: 1234,
+            frequency_mhz: 5180,
+            gateway: GATEWAY,
+        }
+    }
+
+    async fn settled() {
+        sleep(Duration::from_millis(20)).await;
+    }
+
+    /// No secret in the log, in the error or in the settings' `Debug`.
+    fn assert_no_secret(link: &NmLink<Fake>, log: &Arc<StdMutex<Vec<String>>>, secret: &str) {
+        assert!(!calls(log).iter().any(|c| c.contains(secret)));
+        for (_, s) in link.api.added.lock().unwrap().iter() {
+            assert!(!format!("{s:?}").contains(secret));
+        }
+    }
+
+    #[test]
+    fn random_credentials_have_the_expected_shape() {
+        for _ in 0..50 {
+            let ssid = random_ssid();
+            assert!(ssid.len() <= MAX_SSID);
+            assert!(ssid.starts_with("DIRECT-") && ssid.ends_with("-KuickShare"));
+            assert!(ssid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
+            let pw = random_password();
+            assert!(pw.len() >= 24 && (MIN_PSK..=MAX_PSK).contains(&pw.len()));
+            assert!(pw.bytes().all(|b| b.is_ascii_alphanumeric()));
+        }
+        assert_ne!(random_password(), random_password());
+    }
+
+    #[test]
+    fn invalid_ssid_or_key_is_rejected_without_quoting_them() {
+        let ok = |ssid: &str, psk: &str| {
+            ConnSettings::new("x", "wlan0", ssid, psk, Kind::Client { hidden: false })
+        };
+        assert!(ok(&"s".repeat(32), &"k".repeat(8)).is_ok());
+        assert!(ok(&"s".repeat(32), &"k".repeat(63)).is_ok());
+        for (ssid, psk) in [
+            ("s".repeat(33), "k".repeat(8)),
+            (String::new(), "k".repeat(8)),
+            ("s".into(), "k".repeat(7)),
+            ("s".into(), "secretsecretsecret".repeat(4)),
+        ] {
+            let e = ok(&ssid, &psk).unwrap_err();
+            assert_eq!(e.kind(), io::ErrorKind::InvalidInput);
+            assert!(!e.to_string().contains(&psk));
+        }
+    }
+
+    #[test]
+    fn debug_hides_the_key() {
+        let s = ConnSettings::new(
+            AP_PROFILE,
+            "wlan0",
+            "ssid",
+            "supersecretkey",
+            Kind::Ap(BAND_5GHZ),
+        )
+        .unwrap();
+        assert!(!format!("{s:?}").contains("supersecretkey"));
+        assert!(format!("{s:?}").contains("redacted"));
+    }
+
+    #[test]
+    fn ap_settings_dictionary() {
+        let s = ConnSettings::new(
+            AP_PROFILE,
+            "wlan0",
+            "DIRECT-ab-KuickShare",
+            "Passw0rdPassw0rd",
+            Kind::Ap(BAND_5GHZ),
+        )
+        .unwrap();
+        let d = wire::dict(&s);
+        let get = |sec: &str, key: &str| d[sec][key].clone();
+        assert_eq!(get("connection", "id"), Variant::from("kuickshare-ap"));
+        assert_eq!(get("connection", "type"), Variant::from("802-11-wireless"));
+        assert_eq!(get("connection", "autoconnect"), Variant::from(false));
+        assert_eq!(get("connection", "zone"), Variant::from("trusted"));
+        assert_eq!(get("connection", "interface-name"), Variant::from("wlan0"));
+        assert_eq!(
+            get("802-11-wireless", "ssid"),
+            Variant::from(b"DIRECT-ab-KuickShare".to_vec())
+        );
+        assert_eq!(get("802-11-wireless", "mode"), Variant::from("ap"));
+        assert_eq!(get("802-11-wireless", "band"), Variant::from("a"));
+        assert_eq!(get("802-11-wireless", "channel"), Variant::from(36u32));
+        let sec = "802-11-wireless-security";
+        assert_eq!(get(sec, "key-mgmt"), Variant::from("wpa-psk"));
+        assert_eq!(get(sec, "psk"), Variant::from("Passw0rdPassw0rd"));
+        assert_eq!(get(sec, "proto"), Variant::from(vec!["rsn".to_owned()]));
+        assert_eq!(get(sec, "pairwise"), Variant::from(vec!["ccmp".to_owned()]));
+        assert_eq!(get(sec, "group"), Variant::from(vec!["ccmp".to_owned()]));
+        assert_eq!(get("ipv4", "method"), Variant::from("manual"));
+        assert!(d["ipv4"].contains_key("address-data"));
+        assert_eq!(get("ipv6", "method"), Variant::from("disabled"));
+    }
+
+    #[test]
+    fn client_settings_dictionary() {
+        let c = creds();
+        let hidden = |h| wire::dict(&client_settings("wlan0", &c, h).unwrap());
+        let d = hidden(false);
+        assert_eq!(d["connection"]["id"], Variant::from("kuickshare-join"));
+        assert_eq!(d["connection"]["autoconnect"], Variant::from(false));
+        assert!(!d["connection"].contains_key("zone"));
+        assert_eq!(
+            d["802-11-wireless"]["ssid"],
+            Variant::from(c.ssid.as_bytes().to_vec())
+        );
+        assert_eq!(d["802-11-wireless"]["hidden"], Variant::from(false));
+        assert_eq!(
+            d["802-11-wireless-security"]["psk"],
+            Variant::from(c.password.clone())
+        );
+        assert_eq!(d["ipv4"]["method"], Variant::from("auto"));
+        assert_eq!(d["ipv4"]["never-default"], Variant::from(true));
+        assert_eq!(d["ipv4"]["ignore-auto-dns"], Variant::from(true));
+        assert_eq!(d["ipv6"]["method"], Variant::from("disabled"));
+        assert_eq!(
+            hidden(true)["802-11-wireless"]["hidden"],
+            Variant::from(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn host_serves_dhcp_only_after_the_ap_is_active() {
+        let (link, log, dhcp) = fake().build();
+        let c = link.host(4000).await.unwrap();
+        assert_eq!((c.port, c.frequency_mhz, c.gateway), (4000, 5180, GATEWAY));
+        assert!(c.password.len() >= 24);
+        assert!(position(&log, "dhcp_probe wlan0") < position(&log, "add_and_activate"));
+        assert!(position(&log, "wait_activated") < position(&log, "dhcp_bind wlan0"));
+        assert_eq!(count(&log, "dhcp_bind"), 1);
+        assert!(position(&log, "stale_profiles") < position(&log, "add_and_activate"));
+        assert!(dhcp.load(Ordering::SeqCst));
+        let added = link.api.added.lock().unwrap().clone();
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0].0, None);
+        assert_eq!(added[0].1.psk.0, c.password);
+        assert_eq!(added[0].1.ssid, c.ssid.as_bytes());
+        assert!(matches!(added[0].1.kind, Kind::Ap(b) if b.mhz == 5180 && b.channel == 36));
+        assert_no_secret(&link, &log, &c.password);
+    }
+
+    #[tokio::test]
+    async fn release_removes_everything_restores_previous_and_is_idempotent() {
+        let (link, log, dhcp) = fake().build();
+        link.host(1).await.unwrap();
+        link.release().await;
+        settled().await;
+        assert_eq!(live(&link), 0);
+        assert!(!dhcp.load(Ordering::SeqCst));
+        assert_eq!(count(&log, "deactivate /act/1"), 1);
+        assert_eq!(count(&log, "delete /set/1"), 1);
+        assert_eq!(count(&log, "activate /prev/home"), 1);
+        assert!(position(&log, "delete /set/1") < position(&log, "activate /prev/home"));
+        let n = quiet_len(&log);
+        link.release().await;
+        assert_eq!(quiet_len(&log), n);
+        // The link is free again.
+        link.host(1).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn host_falls_back_to_2ghz_and_drops_the_5ghz_profile() {
+        let (link, log, _) = fake()
+            .fail(|op, n| op == "wait_activated" && n == 1)
+            .build();
+        let c = link.host(1).await.unwrap();
+        assert_eq!(c.frequency_mhz, 2437);
+        assert_eq!(count(&log, "dhcp_bind"), 1);
+        let all = calls(&log);
+        let last_wait = all
+            .iter()
+            .rposition(|c| c.starts_with("wait_activated"))
+            .unwrap();
+        assert!(last_wait < position(&log, "dhcp_bind"));
+        let added = link.api.added.lock().unwrap().clone();
+        assert_eq!(added.len(), 2);
+        assert!(matches!(added[0].1.kind, Kind::Ap(b) if b.nm_name == "a"));
+        assert!(matches!(added[1].1.kind, Kind::Ap(b) if b.nm_name == "bg" && b.channel == 6));
+        assert_eq!(count(&log, "delete /set/1"), 1);
+        assert_eq!(live(&link), 1);
+    }
+
+    #[tokio::test]
+    async fn add_failure_also_falls_back() {
+        let (link, _, _) = fake()
+            .fail(|op, n| op == "add_and_activate" && n == 1)
+            .build();
+        assert_eq!(link.host(1).await.unwrap().frequency_mhz, 2437);
+    }
+
+    #[tokio::test]
+    async fn host_cleans_up_after_every_failure_point() {
+        for (op, from) in [
+            ("wifi_device", 1),
+            ("add_and_activate", 1),
+            ("wait_activated", 1),
+        ] {
+            let (link, log, dhcp) = fake().fail(move |o, n| o == op && n >= from).build();
+            let e = link.host(1).await.unwrap_err();
+            assert_eq!(e.to_string(), "boom", "{op}");
+            settled().await;
+            assert_eq!(live(&link), 0, "{op}");
+            assert!(!dhcp.load(Ordering::SeqCst), "{op}");
+            let wifi_touched = count(&log, "add_and_activate") > 0;
+            assert_eq!(count(&log, "activate /prev/home"), wifi_touched as usize);
+            let n = quiet_len(&log);
+            link.release().await;
+            assert_eq!(quiet_len(&log), n, "{op}");
+        }
+    }
+
+    #[tokio::test]
+    async fn only_the_second_attempt_failing_cleans_up_too() {
+        let (link, _, _) = fake()
+            .fail(|op, n| {
+                (op == "wait_activated" && n >= 1) || (op == "add_and_activate" && n == 2)
+            })
+            .build();
+        assert!(link.host(1).await.is_err());
+        assert_eq!(live(&link), 0);
+    }
+
+    #[tokio::test]
+    async fn lookups_that_fail_do_not_stop_hosting() {
+        let (link, _, _) = fake()
+            .fail(|op, _| op == "stale_profiles" || op == "current_profile")
+            .build();
+        link.host(1).await.unwrap();
+        link.release().await;
+        assert_eq!(live(&link), 0);
+    }
+
+    #[tokio::test]
+    async fn dhcp_bind_failure_leaves_the_wifi_alone() {
+        let (link, log, _) = fake().build_with(false);
+        assert!(link.host(1).await.unwrap_err().to_string().contains("busy"));
+        for touching in ["add_and_activate", "delete", "activate", "deactivate"] {
+            assert_eq!(count(&log, touching), 0, "{touching}");
+        }
+        assert_eq!(count(&log, "dhcp_bind"), 0);
+        // Not stuck busy.
+        assert!(link.host(1).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_second_upgrade_is_refused_and_does_not_tear_down_the_first() {
+        let (link, log, dhcp) = fake().build();
+        link.host(1).await.unwrap();
+        let n = quiet_len(&log);
+        let e = link.host(2).await.unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::WouldBlock);
+        let e = link.join(&creds()).await.unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::WouldBlock);
+        assert_eq!(quiet_len(&log), n);
+        assert_eq!(live(&link), 1);
+        assert!(dhcp.load(Ordering::SeqCst));
+        link.release().await;
+        assert_eq!(live(&link), 0);
+    }
+
+    #[tokio::test]
+    async fn stale_profiles_are_swept_before_hosting_and_joining() {
+        let stale = || vec!["/old/1".to_owned(), "/old/2".to_owned()];
+        let mut b = fake();
+        b.stale = stale();
+        let (link, log, _) = b.build();
+        link.host(1).await.unwrap();
+        assert_eq!(count(&log, "delete /old/"), 2);
+        assert!(position(&log, "delete /old/1") < position(&log, "add_and_activate"));
+        link.release().await;
+
+        let mut b = fake();
+        b.stale = stale();
+        let (link, log, _) = b.build();
+        link.join(&creds()).await.unwrap();
+        assert_eq!(count(&log, "delete /old/"), 2);
+        assert!(position(&log, "delete /old/2") < position(&log, "add_and_activate"));
+    }
+
+    #[tokio::test]
+    async fn cleanup_stale_sweeps_and_tears_down() {
+        let mut b = fake();
+        b.stale = vec!["/old/1".into()];
+        let (link, log, _) = b.build();
+        link.host(1).await.unwrap();
+        link.cleanup_stale().await;
+        assert_eq!(count(&log, "delete /old/1"), 2); // sweep at host + at cleanup
+        assert_eq!(live(&link), 0);
+        link.host(1).await.unwrap(); // free again
+    }
+
+    #[tokio::test]
+    async fn join_pins_the_ap_returns_ip_and_restores_previous() {
+        let (link, log, _) = fake().build();
+        let c = creds();
+        assert_eq!(link.join(&c).await.unwrap(), Ipv4Addr::new(192, 168, 49, 7));
+        let added = link.api.added.lock().unwrap().clone();
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0].0.as_deref(), Some("/ap/1"));
+        assert_eq!(added[0].1.psk.0, c.password);
+        assert!(matches!(added[0].1.kind, Kind::Client { hidden: false }));
+        assert_eq!(count(&log, "dhcp_bind"), 0);
+        assert_no_secret(&link, &log, &c.password);
+
+        link.release().await;
+        assert_eq!(live(&link), 0);
+        assert_eq!(count(&log, "activate /prev/home"), 1);
+        let n = quiet_len(&log);
+        link.release().await;
+        assert_eq!(quiet_len(&log), n);
+    }
+
+    #[tokio::test]
+    async fn join_waits_for_the_ap_to_show_up() {
+        let mut b = fake();
+        b.ap_from = 4;
+        let (link, log, _) = b.build();
+        link.join(&creds()).await.unwrap();
+        assert_eq!(count(&log, "find_ap"), 4);
+        assert_eq!(count(&log, "request_scan"), 1);
+        assert_eq!(count(&log, "add_and_activate"), 1);
+    }
+
+    #[tokio::test]
+    async fn join_retries_and_cleans_each_failed_attempt() {
+        let (link, log, _) = fake()
+            .fail(|op, n| op == "wait_activated" && n <= 2)
+            .build();
+        link.join(&creds()).await.unwrap();
+        assert_eq!(count(&log, "add_and_activate"), 3);
+        assert_eq!(count(&log, "delete"), 2);
+        assert_eq!(live(&link), 1);
+        // The third attempt is the first allowed to be hidden, but the AP is visible.
+        let added = link.api.added.lock().unwrap().clone();
+        assert!(
+            added
+                .iter()
+                .all(|(ap, s)| ap.is_some() && matches!(s.kind, Kind::Client { hidden: false }))
+        );
+        link.release().await;
+        assert_eq!(live(&link), 0);
+    }
+
+    #[tokio::test]
+    async fn join_tries_hidden_when_the_ap_is_never_seen_then_gives_up() {
+        let mut b = fake().fail(|op, _| op == "wait_activated");
+        b.ap_from = 0;
+        let (link, log, _) = b.build();
+        let c = creds();
+        let e = link.join(&c).await.unwrap_err();
+        assert_eq!(e.to_string(), "boom");
+        let added = link.api.added.lock().unwrap().clone();
+        assert_eq!(added.len(), (JOIN_ATTEMPTS - HIDDEN_AFTER) as usize);
+        assert!(
+            added
+                .iter()
+                .all(|(ap, s)| ap.is_none() && matches!(s.kind, Kind::Client { hidden: true }))
+        );
+        assert_eq!(count(&log, "request_scan"), JOIN_ATTEMPTS as usize);
+        assert_eq!(live(&link), 0);
+        assert_eq!(count(&log, "activate /prev/home"), 1);
+        assert!(!e.to_string().contains(&c.password));
+        assert_no_secret(&link, &log, &c.password);
+    }
+
+    #[tokio::test]
+    async fn join_never_seen_is_not_found_before_the_hidden_attempts() {
+        let mut b = fake();
+        b.ap_from = 0;
+        b.budget = Duration::ZERO;
+        let (link, log, _) = b.build();
+        let e = link.join(&creds()).await.unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::NotFound);
+        assert_eq!(count(&log, "request_scan"), 1); // budget spent after one attempt
+        assert_eq!(count(&log, "add_and_activate"), 0);
+        assert_eq!(count(&log, "activate /prev/home"), 0); // nothing was touched
+    }
+
+    #[tokio::test]
+    async fn join_cleans_up_after_every_failure_point() {
+        for op in [
+            "wifi_device",
+            "find_ap",
+            "add_and_activate",
+            "wait_activated",
+            "ipv4",
+        ] {
+            let (link, log, _) = fake().fail(move |o, _| o == op).build();
+            assert!(link.join(&creds()).await.is_err(), "{op}");
+            assert_eq!(live(&link), 0, "{op}");
+            let n = quiet_len(&log);
+            link.release().await;
+            assert_eq!(quiet_len(&log), n, "{op}");
+            // Free again.
+            assert!(link.api.live.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn join_without_ip_fails_and_cleans_up() {
+        let (mut link, _, _) = fake().build();
+        link.api.ip = None;
+        assert!(link.join(&creds()).await.is_err());
+        assert_eq!(live(&link), 0);
+    }
+
+    #[tokio::test]
+    async fn join_rejects_bad_credentials_before_touching_anything() {
+        let (link, log, _) = fake().build();
+        let mut c = creds();
+        c.ssid = "s".repeat(33);
+        let e = link.join(&c).await.unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::InvalidInput);
+        for touching in ["delete", "add_and_activate", "activate", "deactivate"] {
+            assert_eq!(count(&log, touching), 0, "{touching}");
+        }
+        let mut c = creds();
+        c.password = "short".into();
+        assert_eq!(
+            link.join(&c).await.unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
+    }
+
+    #[tokio::test]
+    async fn untouched_wifi_is_not_reactivated_unless_the_connection_changed() {
+        let mut b = fake();
+        b.ap_from = 0;
+        b.budget = Duration::ZERO;
+        let (link, log, _) = b.build();
+        assert!(link.join(&creds()).await.is_err());
+        assert_eq!(count(&log, "activate /prev/home"), 0);
+
+        // The device's active connection is no longer the one remembered.
+        let (mut link, log, _) = fake().build();
+        link.api.previous = Some("/prev/home".into());
+        let mut st = link.state.lock().await;
+        st.dev = Some(link.api.wifi_device().await.unwrap());
+        st.previous = Some("/prev/other".into());
+        link.teardown(&mut st).await;
+        drop(st);
+        assert_eq!(count(&log, "activate /prev/other"), 1);
+    }
+
+    #[tokio::test]
+    async fn release_sweeps_a_profile_whose_creation_was_interrupted() {
+        let mut b = fake();
+        b.stale = vec!["/leaked/1".into()];
+        let (link, log, _) = b.build();
+        link.release().await;
+        assert_eq!(count(&log, "delete /leaked/1"), 1);
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_profile_list_is_not_fatal_for_release() {
+        let (link, _, _) = fake().fail(|op, _| op == "stale_profiles").build();
+        link.release().await;
+    }
+
+    #[tokio::test]
+    async fn no_previous_connection_means_nothing_to_restore() {
+        let mut b = fake();
+        b.previous = None;
+        let (link, log, _) = b.build();
+        link.host(1).await.unwrap();
+        link.release().await;
+        assert_eq!(count(&log, "activate"), 0);
+    }
+}

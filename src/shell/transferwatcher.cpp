@@ -145,8 +145,11 @@ void TransferWatcher::notifyConsent(const QString &id, const QString &device, co
     auto *accept = notification->addAction(i18n("Accept"));
     connect(accept, &KNotificationAction::activated, this, [this, id]
             { m_core->accept(id); });
-    // Trusting a device is a feature that can be turned off in the settings.
-    if (m_core->trustedDevicesEnabled())
+    // Trusting a device is a feature that can be turned off in the settings. It needs the sender's
+    // MAC address, which only exists for transfers over the network (id "ip:port"), not for Bluetooth
+    // ones (id "ble-N"). The core reads the MAC from the IPv4 neighbour table, so an IPv6 id would
+    // need the same check there.
+    if (m_core->trustedDevicesEnabled() && id.contains(QLatin1Char(':')))
     {
         auto *trust = notification->addAction(i18n("Accept and trust"));
         connect(trust, &KNotificationAction::activated, this, [this, id]

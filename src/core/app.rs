@@ -14,7 +14,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use rqs_lib::{
-    EndpointInfo, OutboundPayload, RQS, SendInfo, TextPayloadType, Visibility,
+    EndpointInfo, OutboundPayload, RQS, SendInfo, TextPayloadType, Visibility, WifiLink,
     channel::{ChannelMessage, Message, TransferAction},
 };
 use tokio::{
@@ -27,6 +27,7 @@ use crate::{
     allowed::{self, Allowed, AllowedDevice},
     dbus::{self, TransferEvent},
     history::{self, History},
+    link::NmLink,
     settings::{self, Settings},
     trust::{self, Trust, TrustEvent},
 };
@@ -111,12 +112,18 @@ impl Core {
             tracing::warn!("trusted devices unavailable: {e:#}");
         }
         self.conn = Some(conn);
+        if self.settings.wifi_upgrade {
+            remove_stale_wifi_profiles().await;
+        }
         self.start_engine(false).await
     }
 
     pub async fn shutdown(&mut self) {
         if let Some(engine) = self.engine.take() {
             engine.stop().await;
+        }
+        if self.settings.wifi_upgrade {
+            remove_stale_wifi_profiles().await;
         }
     }
 
@@ -161,7 +168,7 @@ impl Core {
         let mac = transfer_id
             .rsplit_once(':')
             .and_then(|(ip, _)| allowed::mac_for_ip(ip))
-            .context("cannot read the MAC address of this device")?;
+            .context("cannot read the MAC address of this device (only devices on the same network can be trusted)")?;
         let device = AllowedDevice { name, mac };
         let mut list = self.allowed.lock().unwrap();
         if !list.contains(&device) {
@@ -244,6 +251,14 @@ impl Core {
     pub fn set_trusted_devices(&mut self, enabled: bool) {
         self.settings.trusted_devices = enabled;
         self.trusted_enabled.store(enabled, Ordering::Relaxed);
+        self.save();
+    }
+
+    pub fn set_wifi_upgrade(&mut self, enabled: bool) {
+        self.settings.wifi_upgrade = enabled;
+        if let Some(engine) = &self.engine {
+            engine.rqs.set_wifi_link(wifi_link(enabled));
+        }
         self.save();
     }
 
@@ -489,6 +504,7 @@ impl Core {
             self.settings.download_dir.clone(),
             Some(self.device_name()),
         );
+        rqs.set_wifi_link(wifi_link(self.settings.wifi_upgrade));
         let (send_tx, _) = rqs
             .run()
             .await
@@ -538,6 +554,24 @@ const STALE_AFTER_SECS: i64 = 600;
 
 fn drop_stale(active: &mut HashMap<String, TransferEvent>, now: i64) {
     active.retain(|_, transfer| now - transfer.last_event < STALE_AFTER_SECS);
+}
+
+/// Removes `kuickshare-*` Wi-Fi profiles left by a crash or by the shutdown, only when the Wi-Fi
+/// upgrade is on (it is the only user of NetworkManager). Quiet when NetworkManager is absent;
+/// bounded so it cannot hang the daemon.
+async fn remove_stale_wifi_profiles() {
+    let link = NmLink::new();
+    let sweep = link.cleanup_stale();
+    if tokio::time::timeout(Duration::from_secs(5), sweep)
+        .await
+        .is_err()
+    {
+        tracing::debug!("Wi-Fi profile cleanup timed out");
+    }
+}
+
+fn wifi_link(enabled: bool) -> Option<Arc<dyn WifiLink>> {
+    enabled.then(|| Arc::new(NmLink::new()) as Arc<dyn WifiLink>)
 }
 
 fn visibility(visible: bool) -> Visibility {

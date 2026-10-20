@@ -303,6 +303,9 @@ void CoreBridge::refreshProperties()
         const bool trusted = props.value(QStringLiteral("TrustedDevicesEnabled"), m_trustedDevicesEnabled).toBool();
         const bool trustedChanged = trusted != m_trustedDevicesEnabled;
         m_trustedDevicesEnabled = trusted;
+        const bool wifiUpgrade = props.value(QStringLiteral("WifiUpgrade"), m_wifiUpgrade).toBool();
+        const bool wifiChanged = wifiUpgrade != m_wifiUpgrade;
+        m_wifiUpgrade = wifiUpgrade;
         const bool trayChanged = tray != m_trayIcon;
         const bool dolphinChanged = dolphin != m_dolphinIntegration;
         m_trayIcon = tray;
@@ -335,6 +338,9 @@ void CoreBridge::refreshProperties()
         }
         if (dolphinChanged) {
             emit dolphinIntegrationChanged();
+        }
+        if (wifiChanged) {
+            emit wifiUpgradeChanged();
         }
         if (keepChanged) {
             emit historyKeepDaysChanged();
@@ -469,6 +475,16 @@ void CoreBridge::setTrustedDevicesEnabled(bool enabled)
     m_trustedDevicesEnabled = enabled;
     emit trustedDevicesEnabledChanged();
     setRemoteProperty(QStringLiteral("TrustedDevicesEnabled"), enabled);
+}
+
+void CoreBridge::setWifiUpgrade(bool enabled)
+{
+    if (enabled == m_wifiUpgrade) {
+        return;
+    }
+    m_wifiUpgrade = enabled;
+    emit wifiUpgradeChanged();
+    setRemoteProperty(QStringLiteral("WifiUpgrade"), enabled);
 }
 
 void CoreBridge::setDolphinIntegration(bool enabled)

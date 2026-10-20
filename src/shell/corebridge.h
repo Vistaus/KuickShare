@@ -36,6 +36,7 @@ class CoreBridge : public QObject
     Q_PROPERTY(qulonglong historyBytes READ historyBytes NOTIFY historyBytesChanged)
     Q_PROPERTY(bool trustedDevicesEnabled READ trustedDevicesEnabled WRITE setTrustedDevicesEnabled NOTIFY trustedDevicesEnabledChanged)
     Q_PROPERTY(bool trayIcon READ trayIcon WRITE setTrayIcon NOTIFY trayIconChanged)
+    Q_PROPERTY(bool wifiUpgrade READ wifiUpgrade WRITE setWifiUpgrade NOTIFY wifiUpgradeChanged)
     Q_PROPERTY(bool dolphinIntegration READ dolphinIntegration WRITE setDolphinIntegration NOTIFY dolphinIntegrationChanged)
     Q_PROPERTY(bool historyEnabled READ historyEnabled WRITE setHistoryEnabled NOTIFY historyEnabledChanged)
     Q_PROPERTY(int historyKeepDays READ historyKeepDays WRITE setHistoryKeepDays NOTIFY historyKeepDaysChanged)
@@ -68,6 +69,7 @@ public:
     bool clipboardHasFiles() const { return m_clipboardHasFiles; }
     qulonglong historyBytes() const { return m_historyBytes; }
     bool trustedDevicesEnabled() const { return m_trustedDevicesEnabled; }
+    bool wifiUpgrade() const { return m_wifiUpgrade; }
     bool dolphinIntegration() const { return m_dolphinIntegration; }
     int historyKeepDays() const { return m_historyKeepDays; }
     QVariantList trustedDevices() const { return m_trustedDevices; }
@@ -82,6 +84,7 @@ public:
     void setHistoryEnabled(bool enabled);
     void setTrayIcon(bool show);
     void setTrustedDevicesEnabled(bool enabled);
+    void setWifiUpgrade(bool enabled);
     void setDolphinIntegration(bool enabled);
     void setHistoryKeepDays(int days);
     Q_INVOKABLE void removeTransfer(const QString &id);
@@ -150,6 +153,7 @@ Q_SIGNALS:
     void historyEnabledChanged();
     void trayIconChanged();
     void trustedDevicesEnabledChanged();
+    void wifiUpgradeChanged();
     void dolphinIntegrationChanged();
     void historyKeepDaysChanged();
     void trustedDevicesChanged();
@@ -199,6 +203,7 @@ private:
     bool m_historyEnabled = true;
     // Off until the core says otherwise: the tray icon stays hidden meanwhile.
     bool m_trayIcon = false;
+    bool m_wifiUpgrade = false;
     bool m_dolphinIntegration = true;
     bool m_trustedDevicesEnabled = true;
     int m_historyKeepDays = 0;

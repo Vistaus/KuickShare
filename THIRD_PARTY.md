@@ -7,7 +7,19 @@ KuickShare is GPL-3.0-or-later (see [LICENSE](LICENSE)). It builds on the projec
 | Project | License | Role |
 | --- | --- | --- |
 | [Packet](https://github.com/nozwock/packet) | GPL-3.0-or-later | KuickShare is derived from it |
-| [rquickshare / `rqs_lib`](https://github.com/nozwock/rquickshare) | GPL-3.0 | Quick Share protocol implementation, used as a Rust dependency (git rev pinned in `Cargo.toml`) |
+| [rquickshare / `rqs_lib`](https://github.com/nozwock/rquickshare) | GPL-3.0 | Quick Share protocol implementation, vendored as a path dependency in [`third_party/rqs_lib`](third_party/rqs_lib) (see below) |
+
+### Changes to `rqs_lib`
+
+`third_party/rqs_lib` is a modified copy of rquickshare `core_lib` at rev `c9ac93f5584a4265e8da679ad689df5be1e80c6b`. Changes against that revision:
+
+| Change | Files |
+| --- | --- |
+| WIFI_HOTSPOT bandwidth upgrade (new) | `src/upgrade.rs`, `src/upgrade/tests.rs`; handlers in `src/hdl/inbound.rs`, `src/hdl/outbound.rs`; `src/lib.rs` (`set_wifi_link`) |
+| Receive session over a non-TCP stream, cancel-safe length prefix | `src/hdl/migratable.rs` (new), `src/hdl/inbound.rs`, `src/hdl/outbound.rs`, `src/utils.rs`, `src/manager.rs` |
+| BLE receiver (new) | `src/hdl/ble_receiver/`, `src/hdl/mod.rs`, `src/lib.rs` |
+| BLE scanner removed (`src/hdl/ble.rs`, `btleplug`); periodic mDNS re-announce instead | `src/hdl/mdns.rs`, `src/lib.rs`, `Cargo.toml` |
+| Formatting only | `src/hdl/mdns_discovery.rs`, `src/hdl/blea.rs` (comment) |
 
 ## System software and bundled libraries
 

@@ -132,6 +132,25 @@ FormCard.FormCardPage {
     }
 
     SectionTitle {
+        text: i18n("Wi-Fi hotspot (experimental)")
+    }
+    FormCard.FormCard {
+        maximumWidth: width - 1
+        FormCard.FormSwitchDelegate {
+            icon.name: "network-wireless"
+            text: i18n("Receive without a shared network")
+            description: i18n("Not usable yet without extra privileges. Be found over Bluetooth and move the transfer to a temporary Wi-Fi hotspot")
+            checked: page.core.wifiUpgrade
+            enabled: page.core.connected
+            onToggled: page.core.wifiUpgrade = checked
+        }
+    }
+    FormCard.FormSectionText {
+        Layout.bottomMargin: 0
+        text: i18n("Experimental. Needs NetworkManager and Bluetooth. While on, this computer is visible over Bluetooth to devices in range, and its Wi-Fi connection may drop while the hotspot is active. See the documentation.")
+    }
+
+    SectionTitle {
         text: i18n("Paired devices")
     }
     FormCard.FormCard {

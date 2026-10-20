@@ -237,6 +237,17 @@ impl Service {
         self.core.lock().await.set_trusted_devices(enabled);
     }
 
+    /// Whether transfers may move to a temporary Wi-Fi hotspot (needs NetworkManager).
+    #[zbus(property)]
+    async fn wifi_upgrade(&self) -> bool {
+        self.core.lock().await.settings().wifi_upgrade
+    }
+
+    #[zbus(property)]
+    async fn set_wifi_upgrade(&self, enabled: bool) {
+        self.core.lock().await.set_wifi_upgrade(enabled);
+    }
+
     /// Puts every setting back to its default (the trusted devices list stays). Fails while a
     /// transfer is in progress.
     async fn reset_settings(&self) -> fdo::Result<()> {

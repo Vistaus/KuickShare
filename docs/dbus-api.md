@@ -94,6 +94,7 @@ All properties are read-write. Persisted ones are saved to `~/.config/kuickshare
 | `TrayIcon` | `b` | `true` | yes | Stored only; the shell shows or hides its tray icon |
 | `DolphinIntegration` | `b` | `true` | yes | Stored only; the shell adds or removes the Dolphin entry |
 | `TrustedDevicesEnabled` | `b` | `true` | yes | Whether the [always-accepted list](#always-accepted-devices) is honoured |
+| `WifiUpgrade` | `b` | `false` | yes | Let transfers move to a temporary Wi-Fi hotspot (see [Wi-Fi upgrade](wifi-direct.md)); needs NetworkManager |
 
 Whether `PropertiesChanged` is emitted for changes made by `ResetSettings` was not checked (unverified); read the properties again after calling it.
 
@@ -257,7 +258,7 @@ Pairing and paired-computer checks use a separate TCP port, 47891 (fixed), Noise
 
 `tests/core/dbus_api.rs` runs the daemon on a private bus and checks:
 
-- default values of `Visible`, `HistoryEnabled`, `TrayIcon`, `DolphinIntegration`, `TrustedDevicesEnabled`, `HistoryKeepDays`, and that `History` and `AllowedDevices` start as `[]`
+- default values of `Visible`, `HistoryEnabled`, `TrayIcon`, `DolphinIntegration`, `TrustedDevicesEnabled`, `WifiUpgrade`, `HistoryKeepDays`, and that `History` and `AllowedDevices` start as `[]`
 - history and integration properties take effect and are written to `settings.json`
 - `ResetSettings` restores defaults, including a renamed device and `Visible`
 - history retention removes old entries from the answer and from the file; `HistorySize`, `RemoveHistory` and `ClearHistory` work; entries without `uid` get one

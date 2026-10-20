@@ -1,7 +1,9 @@
 mod allowed;
 mod app;
 mod dbus;
+mod dhcp;
 mod history;
+mod link;
 mod ratelimit;
 mod safety;
 mod settings;
