@@ -14,6 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 DBus Widgets Test)
 find_package(KF6 REQUIRED COMPONENTS Kirigami I18n CoreAddons Crash DBusAddons StatusNotifierItem Notifications JobWidgets)
+set(QT_MAJOR_VERSION 6)
 include(ECMFindQmlModule)
 ecm_find_qmlmodule(org.kde.kirigami REQUIRED)
 
