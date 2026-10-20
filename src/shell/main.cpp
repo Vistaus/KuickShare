@@ -16,6 +16,7 @@
 #include <QTimer>
 
 #include <KAboutData>
+#include <KCrash>
 #include <KDBusService>
 #include <KLocalizedQmlContext>
 #include <KLocalizedString>
@@ -31,6 +32,7 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
     QApplication::setQuitOnLastWindowClosed(false);
+    KCrash::initialize();
     if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE"))
     {
         QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));

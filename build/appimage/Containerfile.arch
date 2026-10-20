@@ -15,7 +15,7 @@ RUN pacman -Syu --noconfirm --needed \
         base-devel cmake ninja extra-cmake-modules git curl rust protobuf dbus gettext \
         strace patchelf binutils file zsync squashfs-tools xorg-xauth \
         qt6-base qt6-declarative qt6-svg qt6-wayland \
-        kirigami kirigami-addons knotifications kstatusnotifieritem ki18n kconfig kcoreaddons kdbusaddons \
+        kirigami kirigami-addons knotifications kstatusnotifieritem ki18n kconfig kcoreaddons kcrash kdbusaddons \
         kio kiconthemes kjobwidgets \
         qqc2-desktop-style qqc2-breeze-style breeze breeze-icons plasma-integration \
     && pacman -Scc --noconfirm

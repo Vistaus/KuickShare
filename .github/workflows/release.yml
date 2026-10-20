@@ -13,8 +13,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The build runs in Podman containers (Arch for the AppImage, Fedora for the tarball), which the
-      # runner has; Rust comes from the runner's rustup, as on a developer machine.
       - name: Install Rust (stable)
         run: rustup toolchain install stable --profile minimal && rustup default stable
 
@@ -90,8 +88,6 @@ jobs:
           touch /run/.containerenv
           KUICKSHARE_FLATPAK_REPO="$PWD/pages/repo" build/flatpak/build-flatpak.sh --gpg-sign="$GPG_KEY_ID"
 
-      # Right after the signing: the smoke test creates /run/user/0, and from then on gpg looks for its agent in
-      # another place and no longer finds the imported key.
       - name: Finish the repository
         run: build/flatpak/publish-repo.sh pages "$SITE_URL"
 

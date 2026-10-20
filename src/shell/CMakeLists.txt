@@ -13,7 +13,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 DBus Widgets Test)
-find_package(KF6 REQUIRED COMPONENTS Kirigami I18n CoreAddons DBusAddons StatusNotifierItem Notifications JobWidgets)
+find_package(KF6 REQUIRED COMPONENTS Kirigami I18n CoreAddons Crash DBusAddons StatusNotifierItem Notifications JobWidgets)
+ecm_find_qmlmodule(org.kde.kirigami REQUIRED)
 
 qt_add_executable(kuickshare
     main.cpp
@@ -63,7 +64,7 @@ qt_add_qml_module(kuickshare
 
 target_link_libraries(kuickshare PRIVATE
     Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus Qt6::Widgets
-    KF6::Kirigami KF6::I18n KF6::I18nQml KF6::CoreAddons KF6::DBusAddons KF6::StatusNotifierItem KF6::Notifications KF6::JobWidgets
+    KF6::Kirigami KF6::I18n KF6::I18nQml KF6::CoreAddons KF6::Crash KF6::DBusAddons KF6::StatusNotifierItem KF6::Notifications KF6::JobWidgets
 )
 
 # Qt 6.12+ (Arch) refuses executables that copy-relocate its data symbols.
