@@ -328,6 +328,22 @@ mod proxies {
         fn deactivate_connection(&self, active_connection: &ObjectPath<'_>) -> zbus::Result<()>;
     }
 
+    /// Own module: the generated signal types would clash with the ones of another proxy here.
+    pub mod network_state {
+        use zbus::proxy;
+
+        #[proxy(
+            interface = "org.freedesktop.NetworkManager",
+            default_service = "org.freedesktop.NetworkManager",
+            default_path = "/org/freedesktop/NetworkManager"
+        )]
+        pub trait NetworkState {
+            /// Overall connectivity (`NMState`) changed.
+            #[zbus(signal)]
+            fn state_changed(&self, state: u32) -> zbus::Result<()>;
+        }
+    }
+
     #[proxy(
         interface = "org.freedesktop.NetworkManager.Settings",
         default_service = "org.freedesktop.NetworkManager",
@@ -744,6 +760,56 @@ impl NmLink {
                 budget: JOIN_BUDGET,
             },
         )
+    }
+}
+
+/// `NM_STATE_DISCONNECTED` and below: no network at all (Wi-Fi off and nothing else connected).
+const NM_STATE_DISCONNECTED: u32 = 20;
+/// `NM_STATE_CONNECTED_LOCAL` and above: a network is up.
+const NM_STATE_CONNECTED: u32 = 50;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum NetworkEvent {
+    /// The last connection is gone.
+    Lost,
+    /// A network came up after there was none.
+    Gained,
+}
+
+/// What the change from `previous` to `now` means. The first state seen has no `previous`: a
+/// connected one is the normal case at start and says nothing.
+fn network_event(previous: Option<u32>, now: u32) -> Option<NetworkEvent> {
+    if now <= NM_STATE_DISCONNECTED && previous.is_none_or(|p| p > NM_STATE_DISCONNECTED) {
+        Some(NetworkEvent::Lost)
+    } else if now >= NM_STATE_CONNECTED && previous.is_some_and(|p| p < NM_STATE_CONNECTED) {
+        Some(NetworkEvent::Gained)
+    } else {
+        None
+    }
+}
+
+/// Reports every loss and gain of the network that NetworkManager announces, until the receiver
+/// is dropped. Returns at once, quietly, when NetworkManager is not there.
+pub async fn watch_network(events: tokio::sync::mpsc::UnboundedSender<NetworkEvent>) {
+    use futures_util::StreamExt;
+    let watch = async {
+        let connection = Connection::system().await?;
+        let manager = proxies::network_state::NetworkStateProxy::new(&connection).await?;
+        let mut changes = manager.receive_state_changed().await?;
+        let mut previous = None;
+        while let Some(change) = changes.next().await {
+            let state = change.args()?.state;
+            if let Some(event) = network_event(previous, state)
+                && events.send(event).is_err()
+            {
+                break;
+            }
+            previous = Some(state);
+        }
+        zbus::Result::Ok(())
+    };
+    if let Err(e) = watch.await {
+        tracing::debug!("not watching the network: {e}");
     }
 }
 
@@ -1384,6 +1450,21 @@ mod tests {
             hidden(true)["802-11-wireless"]["hidden"],
             Variant::from(true)
         );
+    }
+
+    #[test]
+    fn network_events_are_the_loss_of_the_last_connection_and_the_return_of_one() {
+        use NetworkEvent::{Gained, Lost};
+        assert_eq!(network_event(Some(70), 20), Some(Lost));
+        assert_eq!(network_event(None, 20), Some(Lost));
+        assert_eq!(network_event(Some(40), 10), Some(Lost));
+        assert_eq!(network_event(Some(20), 70), Some(Gained));
+        assert_eq!(network_event(Some(40), 50), Some(Gained));
+        // Nothing new: still down, still up, on the way, or the first state seen being "up".
+        assert_eq!(network_event(Some(20), 20), None);
+        assert_eq!(network_event(Some(20), 40), None);
+        assert_eq!(network_event(Some(70), 50), None);
+        assert_eq!(network_event(None, 70), None);
     }
 
     #[tokio::test]

@@ -47,6 +47,7 @@ async fn main() -> Result<()> {
     )));
     let connection = dbus::serve(core.clone()).await?;
     core.lock().await.start(connection).await?;
+    tokio::spawn(app::watch_network(core.clone()));
 
     // The shell stops the daemon with SIGTERM; Ctrl+C is for running it by hand.
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;

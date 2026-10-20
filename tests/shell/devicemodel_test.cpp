@@ -31,6 +31,34 @@ private Q_SLOTS:
         QCOMPARE(model.rowCount(), 0);
         QVERIFY(model.nameOf(id).isEmpty());
     }
+
+    void aPhoneOnTheLanAndOverBluetoothIsListedOnce()
+    {
+        DeviceModel model;
+        const QString name = QStringLiteral("Pixel");
+        model.upsert(QStringLiteral("ble:G483"), name, QString(), QString(), QString(), QStringLiteral("ble"));
+        QCOMPARE(model.rowCount(), 1);
+        // The LAN entry arrives later: the Bluetooth one steps aside.
+        model.upsert(QStringLiteral("10.0.0.5:4000"), name, QString(), QStringLiteral("10.0.0.5:4000"), QString(), QStringLiteral("lan"));
+        QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(model.data(model.index(0), DeviceModel::MediumRole).toString(), QStringLiteral("lan"));
+        // The Bluetooth entry is still known by name, and a repeated sighting keeps it hidden.
+        QCOMPARE(model.nameOf(QStringLiteral("ble:G483")), name);
+        model.upsert(QStringLiteral("ble:G483"), name, QString(), QString(), QString(), QStringLiteral("ble"));
+        QCOMPARE(model.rowCount(), 1);
+        // The phone leaves the LAN: the Bluetooth entry comes back.
+        model.remove(QStringLiteral("10.0.0.5:4000"));
+        QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(model.data(model.index(0), DeviceModel::MediumRole).toString(), QStringLiteral("ble"));
+    }
+
+    void twoDifferentPhonesStayTwoEntries()
+    {
+        DeviceModel model;
+        model.upsert(QStringLiteral("ble:G483"), QStringLiteral("Pixel"), QString(), QString(), QString(), QStringLiteral("ble"));
+        model.upsert(QStringLiteral("10.0.0.5:4000"), QStringLiteral("Desk"), QString(), QStringLiteral("10.0.0.5:4000"), QString(), QStringLiteral("lan"));
+        QCOMPARE(model.rowCount(), 2);
+    }
 };
 
 QTEST_GUILESS_MAIN(DeviceModelTest)

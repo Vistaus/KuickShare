@@ -730,38 +730,20 @@ async fn without_a_link_everything_stays_on_the_first_channel() {
     assert!(to_rx >= FILE_SIZE as u64);
 }
 
+/// The peer of a LAN session is already on a network: even with a link set, nothing is hosted or
+/// joined and the payload stays on the first channel. The upgrade is tested with in-memory
+/// first channels below (the Bluetooth case).
 #[tokio::test(flavor = "multi_thread")]
-async fn upgrade_moves_the_payload_to_the_new_connection() {
+async fn a_lan_session_never_upgrades_even_with_a_link() {
     let link = Arc::new(FakeLink::default());
-    let ((to_rx, to_tx), sent, received) = transfer(Some(link.clone())).await;
-    assert_eq!(sent, received);
-    assert_eq!(link.hosts.load(Ordering::SeqCst), 1);
-    assert_eq!(link.joins.load(Ordering::SeqCst), 1);
-    // Only the handshake and the hand-over went through the first channel.
-    assert!(
-        to_rx < (FILE_SIZE / 4) as u64,
-        "{to_rx} bytes on the old channel"
-    );
-    assert!(to_tx < 64 * 1024, "{to_tx} bytes back on the old channel");
-    // Both sides release the link when their session ends.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert_eq!(link.releases.load(Ordering::SeqCst), 2);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn failed_join_falls_back_to_the_first_channel() {
-    let link = Arc::new(FakeLink {
-        join_fails: true,
-        ..Default::default()
-    });
     let ((to_rx, _), sent, received) = transfer(Some(link.clone())).await;
     assert_eq!(sent, received);
-    assert_eq!(link.joins.load(Ordering::SeqCst), 1);
+    assert_eq!(link.hosts.load(Ordering::SeqCst), 0);
+    assert_eq!(link.joins.load(Ordering::SeqCst), 0);
     assert!(
         to_rx >= FILE_SIZE as u64,
-        "payload must use the old channel"
+        "payload must use the first channel"
     );
-    assert!(link.releases.load(Ordering::SeqCst) >= 1);
 }
 
 // --- Whole transfer where the first channel is an in-memory stream (BLE bridge) ----------

@@ -100,14 +100,17 @@ impl OutboundRequest {
         payload: OutboundPayload,
         rdi: RemoteDeviceInfo,
     ) -> Self {
-        Self::new_over(
+        let mut request = Self::new_over(
             endpoint_id,
             MigratableStream::Tcp(socket),
             id,
             sender,
             payload,
             rdi,
-        )
+        );
+        // The peer is already on a network (the LAN): no Wi-Fi upgrade is announced or taken.
+        request.upgrade = UpgradeState::new(None);
+        request
     }
 
     pub fn new_over(
@@ -1117,6 +1120,10 @@ impl OutboundRequest {
         info!("We are sending: {:?}", ids);
         let mut ids_iter = ids.into_iter();
 
+        // A write that blocks (the peer stopped reading) must not keep a cancel from the user.
+        let mut cancel_rx = self.sender.subscribe();
+        let transfer_id = self.state.id.clone();
+
         // Loop through all files
         'send_all_files: loop {
             let current = match ids_iter.next() {
@@ -1256,7 +1263,17 @@ impl OutboundRequest {
                     }),
                 };
 
-                self.encrypt_and_send(&wrapper).await?;
+                if !self
+                    .send_unless_cancelled(
+                        &wrapper,
+                        &mut cancel_rx,
+                        &transfer_id,
+                        SEND_STALL_TIMEOUT,
+                    )
+                    .await?
+                {
+                    break 'send_all_files;
+                }
                 self.update_state(
                     |e| {
                         if let Some(mu) = e.transferred_files.get_mut(&current) {
@@ -1302,7 +1319,17 @@ impl OutboundRequest {
                         }),
                     };
 
-                    self.encrypt_and_send(&wrapper).await?;
+                    if !self
+                        .send_unless_cancelled(
+                            &wrapper,
+                            &mut cancel_rx,
+                            &transfer_id,
+                            SEND_STALL_TIMEOUT,
+                        )
+                        .await?
+                    {
+                        break 'send_all_files;
+                    }
                     break;
                 }
             }
@@ -1371,6 +1398,42 @@ impl OutboundRequest {
         }
 
         Ok(())
+    }
+
+    /// Sends a payload frame. A write that cannot finish (the peer cancelled or stopped reading,
+    /// so the socket buffers are full) would block this task for ever and with it the user's
+    /// cancel: the write is raced against a cancel of this transfer and given `stall` to make
+    /// progress. `Ok(false)` means the user cancelled and the session is closed.
+    async fn send_unless_cancelled(
+        &mut self,
+        frame: &OfflineFrame,
+        cancel_rx: &mut Receiver<ChannelMessage>,
+        transfer_id: &str,
+        stall: Duration,
+    ) -> Result<bool, anyhow::Error> {
+        let sent = tokio::select! {
+            r = tokio::time::timeout(stall, self.encrypt_and_send(frame)) => Some(r),
+            () = wait_for_cancel(cancel_rx, transfer_id) => None,
+        };
+        match sent {
+            Some(Ok(result)) => result.map(|()| true),
+            Some(Err(_)) => Err(anyhow!(
+                "the peer stopped reading: a write made no progress for {}s",
+                stall.as_secs()
+            )),
+            None => {
+                self.update_state(
+                    |e| {
+                        e.state = TransferState::Cancelled;
+                    },
+                    true,
+                )
+                .await;
+                // Best effort: the peer may not be reading at all.
+                let _ = tokio::time::timeout(Duration::from_secs(2), self.disconnection()).await;
+                Ok(false)
+            }
+        }
     }
 
     async fn disconnection(&mut self) -> Result<(), anyhow::Error> {
@@ -1682,6 +1745,27 @@ impl OutboundRequest {
     }
 }
 
+/// How long one write may make no progress before the peer is taken to have stopped reading.
+const SEND_STALL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Resolves when a cancel of the transfer `id` arrives; never when the bus closes.
+async fn wait_for_cancel(rx: &mut Receiver<ChannelMessage>, id: &str) {
+    use tokio::sync::broadcast::error::RecvError;
+    loop {
+        match rx.recv().await {
+            Ok(ChannelMessage {
+                id: message_id,
+                msg:
+                    channel::Message::Lib {
+                        action: TransferAction::TransferCancel,
+                    },
+            }) if message_id == id => return,
+            Ok(_) | Err(RecvError::Lagged(_)) => {}
+            Err(RecvError::Closed) => std::future::pending::<()>().await,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1747,5 +1831,100 @@ mod tests {
         crate::upgrade::tests::write_plain_keep_alive(&mut peer).await;
         let err = req.handle().await.unwrap_err();
         assert!(err.to_string().contains("only sent keep-alives"), "{err}");
+    }
+
+    fn plain_request(
+        peer_buffer: usize,
+    ) -> (
+        OutboundRequest,
+        tokio::io::DuplexStream,
+        Sender<ChannelMessage>,
+    ) {
+        let (peer, ours) = tokio::io::duplex(peer_buffer);
+        let (bus, _rx) = tokio::sync::broadcast::channel(8);
+        let mut req = OutboundRequest::new_over(
+            *b"SEND",
+            MigratableStream::Duplex(ours),
+            "id".into(),
+            bus.clone(),
+            OutboundPayload::Text {
+                text: "x".into(),
+                text_type: TextPayloadType::Text,
+            },
+            RemoteDeviceInfo {
+                device_type: crate::DeviceType::Unknown,
+                name: "test".into(),
+            },
+        );
+        req.plain_frames = true;
+        (req, peer, bus)
+    }
+
+    fn big_frame() -> OfflineFrame {
+        OfflineFrame {
+            version: Some(location_nearby_connections::offline_frame::Version::V1.into()),
+            v1: Some(location_nearby_connections::V1Frame {
+                r#type: Some(
+                    location_nearby_connections::v1_frame::FrameType::PayloadTransfer.into(),
+                ),
+                payload_transfer: Some(PayloadTransferFrame {
+                    payload_chunk: Some(
+                        location_nearby_connections::payload_transfer_frame::PayloadChunk {
+                            body: Some(vec![7u8; 64 * 1024]),
+                            ..Default::default()
+                        },
+                    ),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        }
+    }
+
+    /// The peer never reads and the buffer is tiny: the write blocks, yet a cancel gets through.
+    #[tokio::test]
+    async fn a_blocked_write_does_not_keep_a_cancel_from_the_user() {
+        let (mut req, _peer, bus) = plain_request(64);
+        let mut cancel_rx = bus.subscribe();
+        let send = tokio::spawn(async move {
+            let sent = req
+                .send_unless_cancelled(&big_frame(), &mut cancel_rx, "id", Duration::from_secs(30))
+                .await;
+            (sent.unwrap(), req.state.state)
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        bus.send(ChannelMessage {
+            id: "id".into(),
+            msg: channel::Message::Lib {
+                action: TransferAction::TransferCancel,
+            },
+        })
+        .unwrap();
+        let (sent, state) = tokio::time::timeout(Duration::from_secs(5), send)
+            .await
+            .expect("the cancel did not get through a blocked write")
+            .unwrap();
+        assert!(!sent);
+        assert_eq!(state, TransferState::Cancelled);
+    }
+
+    /// A peer that stopped reading ends the session after the stall timeout instead of freezing it.
+    #[tokio::test]
+    async fn a_write_that_makes_no_progress_ends_the_session() {
+        let (mut req, _peer, bus) = plain_request(64);
+        let mut cancel_rx = bus.subscribe();
+        let err = tokio::time::timeout(
+            Duration::from_secs(5),
+            req.send_unless_cancelled(
+                &big_frame(),
+                &mut cancel_rx,
+                "id",
+                Duration::from_millis(200),
+            ),
+        )
+        .await
+        .expect("the stalled write was never given up")
+        .unwrap_err();
+        assert!(err.to_string().contains("stopped reading"), "{err}");
     }
 }

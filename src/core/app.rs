@@ -27,7 +27,7 @@ use crate::{
     allowed::{self, Allowed, AllowedDevice},
     dbus::{self, TransferEvent},
     history::{self, History},
-    link::NmLink,
+    link::{NetworkEvent, NmLink},
     settings::{self, Settings},
     trust::{self, Trust, TrustEvent},
 };
@@ -398,6 +398,43 @@ impl Core {
         engine.rqs.scan_ble(engine.discovery_tx.clone())
     }
 
+    /// The last network connection is gone: the devices found over the LAN cannot be reached any
+    /// more, so they are dropped now instead of when their mDNS records expire, and a Bluetooth
+    /// scan looks for the phones that remain.
+    pub async fn network_lost(&mut self) {
+        if !self.settings.wifi_upgrade {
+            return;
+        }
+        let gone = take_lan_endpoints(&mut self.endpoints.lock().unwrap());
+        if let Some(conn) = &self.conn {
+            for id in &gone {
+                dbus::emit_device_lost(conn, id).await;
+            }
+        }
+        if let Err(e) = self.scan_bluetooth() {
+            tracing::debug!("no Bluetooth scan after the network was lost: {e}");
+        }
+    }
+
+    /// A network is up again: the devices of the LAN would be noticed by the mDNS library only
+    /// after up to 30 s, so the search starts over now. The list stays as it is.
+    pub fn network_gained(&mut self) {
+        if !self.settings.wifi_upgrade {
+            return;
+        }
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+        if !engine.discovery_on {
+            return;
+        }
+        engine.rqs.stop_discovery();
+        if let Err(e) = engine.rqs.discovery(engine.discovery_tx.clone()) {
+            tracing::warn!("could not restart the discovery after the network came back: {e:#}");
+            engine.discovery_on = false;
+        }
+    }
+
     pub fn stop_discovery(&mut self) {
         if let Some(engine) = &mut self.engine
             && engine.discovery_on
@@ -580,6 +617,32 @@ impl Core {
     }
 }
 
+/// Removes the devices found over the LAN (everything but `ble:` ids) and returns their ids.
+fn take_lan_endpoints(endpoints: &mut HashMap<String, EndpointInfo>) -> Vec<String> {
+    let lan: Vec<String> = endpoints
+        .iter()
+        .filter(|(_, endpoint)| endpoint.ble.is_none())
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in &lan {
+        endpoints.remove(id);
+    }
+    lan
+}
+
+/// Follows NetworkManager: `Core::network_lost` when the last connection drops and
+/// `Core::network_gained` when one comes back.
+pub async fn watch_network(core: Arc<tokio::sync::Mutex<Core>>) {
+    let (tx, mut events) = mpsc::unbounded_channel();
+    tokio::spawn(crate::link::watch_network(tx));
+    while let Some(event) = events.recv().await {
+        match event {
+            NetworkEvent::Lost => core.lock().await.network_lost().await,
+            NetworkEvent::Gained => core.lock().await.network_gained(),
+        }
+    }
+}
+
 /// A Bluetooth send scans for at most 12 s and then dials.
 const BLE_START_TIMEOUT: Duration = Duration::from_secs(25);
 
@@ -659,6 +722,24 @@ mod tests {
         let mut transfer = TransferEvent::default();
         transfer.last_event = last_event;
         transfer
+    }
+
+    #[test]
+    fn losing_the_network_drops_the_lan_devices_and_keeps_the_bluetooth_ones() {
+        let lan = EndpointInfo {
+            id: "10.0.0.5:4000".into(),
+            ..EndpointInfo::default()
+        };
+        let ble = EndpointInfo {
+            id: "ble:G483".into(),
+            ble: Some(rqs_lib::BleTarget {
+                endpoint_id: *b"G483",
+            }),
+            ..EndpointInfo::default()
+        };
+        let mut endpoints = HashMap::from([(lan.id.clone(), lan), (ble.id.clone(), ble)]);
+        assert_eq!(take_lan_endpoints(&mut endpoints), ["10.0.0.5:4000"]);
+        assert_eq!(endpoints.keys().collect::<Vec<_>>(), ["ble:G483"]);
     }
 
     #[test]

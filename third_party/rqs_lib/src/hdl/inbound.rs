@@ -68,8 +68,11 @@ pub struct InboundRequest {
 }
 
 impl InboundRequest {
+    /// A session over the LAN: the peer is already on a network, so no Wi-Fi upgrade is offered.
     pub fn new(socket: TcpStream, id: String, sender: Sender<ChannelMessage>) -> Self {
-        Self::new_over(MigratableStream::Tcp(socket), id, sender)
+        let mut request = Self::new_over(MigratableStream::Tcp(socket), id, sender);
+        request.upgrade = UpgradeState::new(None);
+        request
     }
 
     /// Runs the session over any stream. Nothing here depends on the peer address: `id` is

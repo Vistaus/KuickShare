@@ -959,9 +959,13 @@ async fn expire_device(
         return;
     }
     endpoints.lock().unwrap().remove(&id);
+    emit_device_lost(&connection, &id).await;
+}
+
+pub async fn emit_device_lost(connection: &Connection, id: &str) {
     let emitted = async {
-        let iface = interface_ref(&connection).await?;
-        Service::device_lost(iface.signal_emitter(), &id).await
+        let iface = interface_ref(connection).await?;
+        Service::device_lost(iface.signal_emitter(), id).await
     };
     if let Err(e) = emitted.await {
         tracing::warn!("failed to emit DeviceLost: {e}");
