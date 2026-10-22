@@ -253,6 +253,9 @@ Kirigami.ScrollablePage {
 
     function stateText(state, kind, ackBytes, viaBluetooth) {
         switch (state) {
+        case "Starting":
+            // The send was requested but the core has not reported anything yet.
+            return viaBluetooth ? i18n("Looking for the device…") : i18n("Connecting…");
         case "WaitingForUserConsent":
             return i18n("Waiting for your approval");
         case "ReceivingFiles":

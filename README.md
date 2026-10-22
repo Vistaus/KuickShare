@@ -76,7 +76,7 @@ Update, uninstall and requirements are in the [usage guide](docs/usage.md).
 
 - [Usage](docs/usage.md): install, update, uninstall, everyday use, trusted and paired devices.
 - [Architecture](docs/architecture.md): design, security model, packaging.
-- [Wi-Fi upgrade](docs/wifi-direct.md): transfers without a shared network (experimental), how it works, requirements, limits, open work.
+- [Wi-Fi upgrade](docs/wifi-direct.md): transfers without a shared network (experimental), how it works, requirements, limits.
 - [D-Bus API](docs/dbus-api.md): the interface of the background service.
 - [Contributing](CONTRIBUTING.md): build, tests, translations, releases.
 - [Security](SECURITY.md): reporting a vulnerability, known limits.

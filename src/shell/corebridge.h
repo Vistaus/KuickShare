@@ -193,6 +193,8 @@ private Q_SLOTS:
     void onServiceUnregistered();
 
 private:
+    /// Ends a pending send row that the core never took over.
+    void failIfStarting(const QString &deviceId);
     void call(const QString &method, const QVariantList &args);
     void callAsync(const QDBusMessage &message, const std::function<void()> &onSuccess = {}, const std::function<void()> &onError = {});
     void setRemoteProperty(const QString &name, const QVariant &value);

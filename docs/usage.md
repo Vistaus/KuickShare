@@ -7,7 +7,7 @@ KuickShare has two programs. `kuickshare` is the window, tray icon and notificat
 ## Requirements
 
 - KDE Plasma 6. The AppImage and the Flatpak bring their own libraries (the Flatpak needs Flatpak and [Flathub](https://flathub.org/setup)). The tarball uses the system's Qt 6 and KDE Frameworks 6: on Fedora, `kf6-kirigami`, `kf6-kirigami-addons` and `qt6-qtdeclarative`. The installer checks for them and prints the `dnf install` (or `pacman`) line if one is missing.
-- The computer and the phone on the same Wi-Fi network. Bluetooth is used to find devices, never to move data. Wi-Fi Direct is not supported.
+- The computer and the phone on the same Wi-Fi network. Bluetooth is used to find devices, never to move data. Without a shared network, see the experimental [Wi-Fi upgrade](wifi-direct.md).
 - A Google account is not needed and cannot be used.
 
 ## Installing, updating and uninstalling

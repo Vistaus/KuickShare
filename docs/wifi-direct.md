@@ -1,7 +1,7 @@
 # Wi-Fi upgrade (transfers without a shared network)
 
 > [!WARNING]
-> Experimental and off by default (`WifiUpgrade`, Settings → Wi-Fi hotspot). Verified on real hardware (MT7922, Pixel 7 with Wi-Fi off), in both directions, over Bluetooth then Wi-Fi: receiving from the phone (we host a NetworkManager hotspot) and sending to it (the phone hosts a Wi-Fi Direct group that we join as a normal WPA2 client; a 328 MB file arrived intact at about 55 MB/s). Receiving from a Galaxy A55 (Samsung Quick Share, Android 16) also works: the phone sends over BLE GATT, joins our hotspot on 5 GHz and a file of about 329 MB took about 16 s on the hotspot (about 20 MB/s; the file was not compared after the transfer). Sending to the Galaxy also works: BLE GATT first, then the Wi-Fi Direct group the Galaxy offers (a 329 MB video took about 5 s on the Wi-Fi leg, about 65 MB/s from the log timestamps, and arrived with the same SHA-256 as the original), see [Sending over GATT](#sending-over-gatt). Not verified: other phones and Wi-Fi chips, a laptop with its radio in use, Flatpak.
+> Experimental and off by default (`WifiUpgrade`, Settings → Wi-Fi hotspot). Verified on real hardware (MT7922, Pixel 7 with Wi-Fi off), in both directions, over Bluetooth then Wi-Fi: receiving from the phone (we host a NetworkManager hotspot) and sending to it (the phone hosts a Wi-Fi Direct group that we join as a normal WPA2 client; a 328 MB file arrived intact at about 55 MB/s). Receiving from a Galaxy A55 (Samsung Quick Share, Android 16) also works: the phone sends over BLE GATT, joins our hotspot on 5 GHz and a file of about 329 MB took about 16 s on the hotspot (about 20 MB/s; the file was not compared after the transfer). Sending to the Galaxy also works: BLE GATT first, then the Wi-Fi Direct group the Galaxy offers (a 329 MB video took about 5 s on the Wi-Fi leg, about 65 MB/s from the log timestamps, and arrived with the same SHA-256 as the original), see [Sending over GATT](#sending-over-gatt). Not verified: see [Limits and unverified](#limits-and-unverified).
 
 ## What it does
 
@@ -67,31 +67,38 @@ Findings from the hand test (tested Wi-Fi chip: MT7922, tested phone: Pixel 7):
 - A DHCP server of our own had to answer by unicast to the client's MAC: the phone never accepted broadcast offers. NetworkManager's `dnsmasq` (`ipv4.method=shared`) works with the Pixel in both directions, so our server was removed.
 - Android drops a network it validated as having no internet when joined from Settings. Nearby joins programmatically, which is expected to avoid this *(unverified)*.
 
-## Not verified yet
+## Limits and unverified
 
-- The NAT rules that NetworkManager adds for the shared connection were not checked.
-- Phones other than a Pixel 7 and a Galaxy A55 (Samsung Quick Share), Wi-Fi chips other than the MT7922, a laptop that is using its radio, two phones at once, DFS and regulatory domains (channel 36 with fallback to 2.4 GHz).
-- Whether other phones need the Receive screen like these two do, and whether `MIDGROUND` (seen once on the Pixel) ever advertises GATT without L2CAP.
-- Receivers that do not offer a bandwidth upgrade by themselves (the Pixel and the Galaxy do): the sender would have to send `UPGRADE_PATH_REQUEST`, which is not implemented.
-- That Plasma shows each new step text and the cancel button of the transfer job as the shell changes them (it emits the job's description and capabilities; the tracker's behaviour was not checked).
-- The advertisement leaves out the opaque "RxInstantConnectionAdv" field seen in another project's capture; the phone listed the computer without it.
-- That the phone's `CLIENT_INTRODUCTION` endpoint id matches the one in its connection request (the receiver requires it).
-- The plain frames after the upgrade follow what the phone's log shows (it discards our encrypted frames and sends plain ones); the writing side of the reference code was not read.
+Everything here was tested only with a Pixel 7 and a Galaxy A55 (Samsung Quick Share) on one MT7922 adapter. No other phone is available, so these cannot be closed by the project:
+
+- Other phones and Wi-Fi chips, a laptop that is using its radio, two phones at once, DFS and regulatory domains (channel 36 with fallback to 2.4 GHz). Whether other phones need the Receive screen like these two do, and whether `MIDGROUND` (seen once on the Pixel) ever advertises GATT without L2CAP.
+- Receivers that do not offer a bandwidth upgrade by themselves (the Pixel and the Galaxy do): the sender would have to send `UPGRADE_PATH_REQUEST`. It is not implemented and cannot be tested without such a phone.
+- Our own Wi-Fi Direct group owner is not implemented, see [above](#why-not-a-p2p-group); the hotspot is the supported way to receive.
+- Firewalls other than firewalld on Fedora. With ufw or nftables the hotspot always uses the `trusted` zone, which opens every port to the phone, and their own rules may also block DHCP and DNS of the hotspot *(not tested)*. The case where polkit refuses the change on firewalld has not been tried.
+
+Checked on a hand run of the local script `dist/test-wifi.sh` (not in git; Pixel 7 receive, Galaxy A55 send):
+
+- **NAT:** while the hotspot is up NetworkManager adds `masquerade` for `192.168.49.0/24` leaving the subnet, and forward rules limited to `wlp4s0` and that subnet; they are gone afterwards and nothing is left behind. `net.ipv4.ip_forward` stays `0`, so nothing is actually routed to another network, which a transfer between the two devices does not need.
+- **Plasma job:** the job's step texts ("Looking for the device…", "Connecting…", "Waiting for the other device to accept", "Sending files", "Receiving files") and its terminate/progress updates reach the tracker (`org.kde.JobViewV3` in the bus capture). The popup showed the title, the progress bar and the Cancel button for a receive; the other step texts were seen only in the capture, not on screen.
+- **Kernel log:** no `btusb`/`mt79xx` reset or Wi-Fi timeout around the transfers. One `hci0: Opcode 0x202d failed: -16` ("Unable to disable LL privacy") appeared when BLE advertising started, a few seconds before a transfer; the controller was busy and the transfer was not affected.
+
+Seen in logs, so not open: the plain frames after the upgrade, the phone's `CLIENT_INTRODUCTION` endpoint id (checked by the receiver before it continues) and an advertisement without the "RxInstantConnectionAdv" field all work on both phones (transfers completed, one compared by SHA-256).
+
+Behaviour with a known cause or a harmless effect, from the logs of the Galaxy A55 send (UTC, timestamps from the daemon and `btmon`):
+
+- **First join fails** with `the access point was not found`, about 2.5 s after the offer and before NetworkManager starts to activate; the second attempt associates about 1.5 s later and the transfer proceeds. The group is probably not in the scan results yet *(inferred: neither NetworkManager nor wpa_supplicant log scan results)*. The retry is the intended handling.
+- **`GattDial: disconnect timed out`** is our 2 s timer. The Galaxy never closes the LE link; BlueZ sent the HCI disconnect 0.63 s after the timer and it completed with status 0. The Wi-Fi was already associated. No controller error or reset appears in `btmon`; the kernel log was not captured, so a coexistence problem is not excluded (it did not occur in a later run). The link does close and the transfer is unaffected.
+- The ATT "Attribute Not Found" probes right after the GATT send, `Reject scan trigger since one is already pending` and the `mdns_sd` closed-channel errors when the daemon exits are benign. `mdns_sd` also logs `Network is unreachable` sending to 224.0.0.251 on the hotspot interface (no multicast route there, *inferred*); it has no visible effect.
+
+Timings: the 40 s watchdog for a send that never started covers the observed time to the first frame (about 18 s over L2CAP and 22 s over GATT, most of it the 12 s scan); the join takes up to about 9 s and the phone gives up after about 15 s; the Pixel sends its full advertisement only about every 10 s, so a scan window shorter than that can miss it (the windows are 15 s for the list and 12 s for a send).
+
+Known weaknesses without a reproducible cause: BLE re-advertising and `Device::disconnect` side effects; the GATT notify race (a rewrite with `CharacteristicNotifyMethod::Io` would bind the session to the subscriber); phones on the LAN were not rechecked after the BLE scanner was removed; a phone that cancels in the middle of a file is noticed only when a write makes no progress for 30 s (the user's own cancel works at once; a cancel frame sent by the phone is not read while we send).
+
+For a phone-side capture use `adb logcat -s NearbyConnections NearbyMediums NearbySharing WifiP2pService` (offered medium, `supports_disabling_encryption`, join latency, invalid frames, `allowBleL2capConnections`) together with the daemon log and `btmon -w`, also with a phone on another network and on the same LAN (a phone on the same LAN refuses a hotspot upgrade).
 
 ## Testing
 
 `cargo test -p rqs_lib` runs the hand-over, plain and encrypted, the Bluetooth receiver and sender and the scanner in memory and over loopback with a fake `WifiLink`. `cargo test --all-features` covers `link.rs` with a fake NetworkManager. Neither needs hardware. The real link needs a manual test (Wi-Fi card, Bluetooth adapter, phone, `adb logcat` and `btmon` captures): the procedure is in [CONTRIBUTING.md](../CONTRIBUTING.md#hand-tests-with-a-phone-wi-fi-upgrade-and-bluetooth).
-
-## Open work
-
-Every item needs a setup that was not available so far. Limits that need other phones or hardware are under [Not verified yet](#not-verified-yet).
-
-| # | Work | Notes |
-|---|---|---|
-| 1 | Unexplained behaviour | The 40 s watchdog that reports a Bluetooth send that never started covers the observed time from the send request to the first frame (about 18 s over L2CAP and 22 s over GATT, most of it the 12 s scan); the join to the phone's network takes up to about 9 s and the phone gives up after about 15 s; BLE re-advertising and `Device::disconnect` side effects; the first join to the Galaxy's Wi-Fi Direct group failed with `the access point was not found` (the group is not in the scan results yet) and the retry worked, about 5 s after the offer; after a finished GATT send BlueZ sent the HCI disconnect about 2 s after our request, while the Wi-Fi was associating, so `GattDial` logged `disconnect timed out` although the link did close *(a shared Bluetooth/Wi-Fi controller is the suspected cause, not verified)*; the GATT notify race (a rewrite with `CharacteristicNotifyMethod::Io` would bind the session to the subscriber); phones on the LAN were not rechecked after the BLE scanner was removed; a phone that cancels in the middle of a file is noticed only when a write makes no progress for 30 s (the user's own cancel works at once; a cancel frame sent by the phone is not read while we send); the Pixel sends its full advertisement only about every 10 s, so a scan window shorter than that can miss it (the scan windows are 15 s for the list and 12 s for a send) |
-| 2 | Other firewalls and distributions | Only firewalld on Fedora was tried. With ufw or nftables the hotspot always uses the `trusted` zone, which opens every port to the phone, and their own rules may also block DHCP and DNS of the hotspot *(not tested)*. The case where polkit refuses the change on firewalld has not been tried |
-
-Phone checklist for item 1: `adb logcat -s NearbyConnections NearbyMediums NearbySharing WifiP2pService` (the phone's decisions are in its log: offered medium, `supports_disabling_encryption`, join latency, invalid frames, `allowBleL2capConnections`) together with the daemon log and `btmon -w`. Repeat with a phone on another network and on the same LAN (a phone on the same LAN refuses a hotspot upgrade).
 
 ## Sending over GATT
 
