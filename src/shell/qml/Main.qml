@@ -40,7 +40,15 @@ Kirigami.ApplicationWindow {
         target: root.core
 
         function onTransferChanged(id) {
-            if (id !== root.pendingSendId || root.core.transfers.info(id).state !== "Finished") {
+            if (id !== root.pendingSendId) {
+                return;
+            }
+            const state = root.core.transfers.info(id).state;
+            if (state !== "Finished") {
+                // A failed send keeps its files and text for another try; no state means the row is gone.
+                if (state === undefined || ["Cancelled", "Rejected", "Disconnected"].includes(state)) {
+                    root.pendingSendId = "";
+                }
                 return;
             }
             root.pendingSendId = "";

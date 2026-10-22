@@ -194,7 +194,7 @@ private Q_SLOTS:
 
 private:
     /// Ends a pending send row that the core never took over.
-    void failIfStarting(const QString &deviceId);
+    void failIfStarting(const QString &deviceId, quint64 sendNo);
     void call(const QString &method, const QVariantList &args);
     void callAsync(const QDBusMessage &message, const std::function<void()> &onSuccess = {}, const std::function<void()> &onError = {});
     void setRemoteProperty(const QString &name, const QVariant &value);
@@ -210,6 +210,8 @@ private:
     QProcess m_core;
     QTimer m_discoveryStopTimer;
     QHash<QString, int> m_outgoingFileCounts;
+    /// Number of the latest send per device, so a late failure never ends a newer send's row.
+    QHash<QString, quint64> m_sendNo;
     bool m_discoveryRunning = false;
     bool m_connected = false;
     bool m_serviceStarting = false;

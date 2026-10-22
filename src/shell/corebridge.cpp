@@ -727,6 +727,7 @@ void CoreBridge::stopDiscoveryNow()
 void CoreBridge::sendFiles(const QString &deviceId, const QStringList &paths)
 {
     m_outgoingFileCounts.insert(deviceId, paths.size());
+    const quint64 sendNo = ++m_sendNo[deviceId];
     emit sendRequested(deviceId, m_devices.nameOf(deviceId), paths.size());
     // Show the row now: finding the device and connecting can take several seconds before the
     // core reports anything. The first TransferUpdated for this id takes it over.
@@ -737,19 +738,20 @@ void CoreBridge::sendFiles(const QString &deviceId, const QStringList &paths)
                         {QStringLiteral("files"), paths.join(QLatin1Char('\n'))}});
     auto msg = methodCall(iface, QStringLiteral("SendFiles"));
     msg.setArguments({deviceId, paths});
-    callAsync(msg, {}, [this, deviceId]
+    callAsync(msg, {}, [this, deviceId, sendNo]
               {
-                  failIfStarting(deviceId);
+                  failIfStarting(deviceId, sendNo);
                   emit sendRefused(deviceId);
               });
     // The core's own watchdog covers Bluetooth sends only: do not leave a row at "Connecting…" for good.
-    QTimer::singleShot(45'000, this, [this, deviceId]
-                       { failIfStarting(deviceId); });
+    QTimer::singleShot(45'000, this, [this, deviceId, sendNo]
+                       { failIfStarting(deviceId, sendNo); });
 }
 
-void CoreBridge::failIfStarting(const QString &deviceId)
+void CoreBridge::failIfStarting(const QString &deviceId, quint64 sendNo)
 {
-    if (m_transfers.info(deviceId).value(QStringLiteral("state")).toString() == QLatin1String("Starting"))
+    const bool current = m_sendNo.value(deviceId) == sendNo;
+    if (current && m_transfers.info(deviceId).value(QStringLiteral("state")).toString() == QLatin1String("Starting"))
     {
         m_transfers.update(deviceId, {{QStringLiteral("state"), QStringLiteral("Disconnected")}});
     }
