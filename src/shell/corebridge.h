@@ -38,6 +38,8 @@ class CoreBridge : public QObject
     Q_PROPERTY(bool trayIcon READ trayIcon WRITE setTrayIcon NOTIFY trayIconChanged)
     Q_PROPERTY(bool wifiUpgrade READ wifiUpgrade WRITE setWifiUpgrade NOTIFY wifiUpgradeChanged)
     Q_PROPERTY(bool dolphinIntegration READ dolphinIntegration WRITE setDolphinIntegration NOTIFY dolphinIntegrationChanged)
+    Q_PROPERTY(bool appImage READ appImage CONSTANT)
+    Q_PROPERTY(bool menuEntry READ menuEntry WRITE setMenuEntry NOTIFY menuEntryChanged)
     Q_PROPERTY(bool historyEnabled READ historyEnabled WRITE setHistoryEnabled NOTIFY historyEnabledChanged)
     Q_PROPERTY(int historyKeepDays READ historyKeepDays WRITE setHistoryKeepDays NOTIFY historyKeepDaysChanged)
     Q_PROPERTY(bool hideWhenDnd READ hideWhenDnd WRITE setHideWhenDnd NOTIFY hideWhenDndChanged)
@@ -72,6 +74,8 @@ public:
     bool wifiUpgrade() const { return m_wifiUpgrade; }
     bool dolphinIntegration() const { return m_dolphinIntegration; }
     int historyKeepDays() const { return m_historyKeepDays; }
+    bool appImage() const;
+    bool menuEntry() const;
     QVariantList trustedDevices() const { return m_trustedDevices; }
     QVariantList allowedDevices() const { return m_allowedDevices; }
 
@@ -89,6 +93,8 @@ public:
     /// hotspot would then use a zone that lets the phone reach every port) and waits for the user.
     Q_INVOKABLE void requestWifiUpgrade();
     void setDolphinIntegration(bool enabled);
+    /// AppImage only: writes or removes the application menu entry (no first-start question is asked afterwards).
+    void setMenuEntry(bool enabled);
     void setHistoryKeepDays(int days);
     Q_INVOKABLE void removeTransfer(const QString &id);
     void setSuspended(bool suspended);
@@ -161,6 +167,7 @@ Q_SIGNALS:
     void wifiUpgradeChanged();
     void firewallWarning();
     void dolphinIntegrationChanged();
+    void menuEntryChanged();
     void historyKeepDaysChanged();
     void trustedDevicesChanged();
     void allowedDevicesChanged();

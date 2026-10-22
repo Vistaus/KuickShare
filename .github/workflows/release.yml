@@ -23,24 +23,26 @@ jobs:
 
       - name: Check the tag matches the built version
         run: |
-          test -f "dist/KuickShare-${GITHUB_REF_NAME#v}-x86_64.AppImage"
+          test "$(sed -n 's/^project(kuickshare VERSION \([0-9.]*\).*/\1/p' src/shell/CMakeLists.txt)" = "${GITHUB_REF_NAME#v}"
+          test -f dist/KuickShare-x86_64.AppImage
+          test -f dist/KuickShare-x86_64.AppImage.zsync
           test -f "dist/KuickShare-${GITHUB_REF_NAME#v}-x86_64.tar.gz"
 
       - name: Test
         run: |
-          build/appimage/test-appimage.sh dist/KuickShare-*-x86_64.AppImage
+          build/appimage/test-appimage.sh dist/KuickShare-x86_64.AppImage
           build/test-tarball.sh dist/KuickShare-*-x86_64.tar.gz
 
       - name: Checksum
         run: |
           cd dist
-          sha256sum KuickShare-*-x86_64.AppImage KuickShare-*-x86_64.tar.gz > SHA256SUMS
+          sha256sum KuickShare-x86_64.AppImage KuickShare-*-x86_64.tar.gz > SHA256SUMS
 
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
-            dist/KuickShare-*-x86_64.AppImage
-            dist/KuickShare-*-x86_64.AppImage.zsync
+            dist/KuickShare-x86_64.AppImage
+            dist/KuickShare-x86_64.AppImage.zsync
             dist/KuickShare-*-x86_64.tar.gz
             dist/SHA256SUMS
 

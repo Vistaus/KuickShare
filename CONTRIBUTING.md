@@ -24,8 +24,8 @@ Dependencies live in a podman image defined by [`build/Containerfile`](build/Con
 ```sh
 build/build-env.sh cargo build
 build/build-env.sh sh -c 'cmake -S src/shell -B dist/tmp/cmake-dev -G Ninja && cmake --build dist/tmp/cmake-dev'
-build/build-appimage.sh    # dist/KuickShare-<version>-x86_64.AppImage and .zsync (Fedora and Arch images; first run is long)
-build/appimage/test-appimage.sh dist/KuickShare-<version>-x86_64.AppImage
+build/build-appimage.sh    # dist/KuickShare-x86_64.AppImage and .zsync (Fedora and Arch images; first run is long)
+build/appimage/test-appimage.sh dist/KuickShare-x86_64.AppImage
 build/build-tarball.sh && build/test-tarball.sh dist/KuickShare-<version>-x86_64.tar.gz
 build/flatpak/build-flatpak.sh && build/flatpak/test-flatpak.sh dist/KuickShare-<version>.flatpak
 ```

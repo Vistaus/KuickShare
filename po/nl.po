@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kuickshare 1.0.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-20 16:56+0000\n"
+"POT-Creation-Date: 2026-10-22 10:30+0000\n"
 "PO-Revision-Date: 2026-10-20 11:00+0200\n"
 "Last-Translator: Heimen Stoffels <vistausss@fastmail.com>\n"
 "Language-Team: \n"
@@ -23,11 +23,15 @@ msgstr ""
 msgid "Could not update Dolphin's context menu"
 msgstr "Het rechtermuisknopmenu van Dolphin kan niet worden bijgewerkt"
 
-#: src/shell/corebridge.cpp:526
+#: src/shell/corebridge.cpp:538
+msgid "Could not update the application menu"
+msgstr "Het toepassingsmenu kan niet worden bijgewerkt"
+
+#: src/shell/corebridge.cpp:549
 msgid "Could not add KuickShare to the menus"
 msgstr "KuickShare kan niet worden toegevoegd aan de menu's"
 
-#: src/shell/corebridge.cpp:622
+#: src/shell/corebridge.cpp:646
 msgid ""
 "The Flatpak has no access to %1. Allow it with: flatpak override --user --"
 "filesystem=\"%1\" %2"
@@ -35,11 +39,11 @@ msgstr ""
 "Flatpak heeft geen toegang tot %1. Toegang geven kan door middel van de "
 "opdracht: flatpak override --user --filesystem=\"%1\" %2"
 
-#: src/shell/corebridge.cpp:669
+#: src/shell/corebridge.cpp:693
 msgid "Could not update the autostart entry"
 msgstr "Het automatische opstartitem kan niet worden toegevoegd"
 
-#: src/shell/corebridge.cpp:763
+#: src/shell/corebridge.cpp:787
 msgid "Only files can be shared, folders are not supported"
 msgstr "Je kunt alleen bestanden delen, geen mappen"
 
@@ -719,7 +723,15 @@ msgstr "Dolphin-menu"
 msgid "Add “Send with KuickShare” to the menu of files"
 msgstr "Voeg ‘Vesturen met KuickShare’ toe aan het rechtermuisknopmenu"
 
+#: src/shell/qml/SettingsPage.qml:333
+msgid "Application menu entry"
+msgstr "Item in het toepassingsmenu"
+
 #: src/shell/qml/SettingsPage.qml:334
+msgid "Add KuickShare to the application menu"
+msgstr "KuickShare toevoegen aan het toepassingsmenu"
+
+#: src/shell/qml/SettingsPage.qml:342
 msgid ""
 "Without the tray icon, closing the window quits KuickShare, and nothing can "
 "be received until you open it again. At login it starts hidden: open "
@@ -729,11 +741,11 @@ msgstr ""
 "afgesloten, waardoor er ook niks meer kan worden ontvangen. Na het aanmelden "
 "wordt KuickShare geminimaliseerd opgestart."
 
-#: src/shell/qml/SettingsPage.qml:347
+#: src/shell/qml/SettingsPage.qml:355
 msgid "firewalld is not running"
 msgstr "firewalld draait niet"
 
-#: src/shell/qml/SettingsPage.qml:348
+#: src/shell/qml/SettingsPage.qml:356
 msgid ""
 "firewalld is not running, so the firewall cannot be opened for a single "
 "port. While the hotspot is up, the phone that joins it can reach every "
@@ -743,11 +755,11 @@ msgstr ""
 "geopend. Zolang de hotspot actief is, kan de telefoon die er verbinding mee "
 "maakt elke service op deze computer bereiken. Toch inschakelen?"
 
-#: src/shell/qml/SettingsPage.qml:356
+#: src/shell/qml/SettingsPage.qml:364
 msgid "Reset preferences?"
 msgstr "Instellingen herstellen?"
 
-#: src/shell/qml/SettingsPage.qml:357
+#: src/shell/qml/SettingsPage.qml:365
 msgid ""
 "Every setting goes back to its default. The history and the paired and "
 "trusted devices are kept."
@@ -755,15 +767,15 @@ msgstr ""
 "Alle instellingen worden teruggezet op de standaardwaarden. De geschiedenis "
 "en gekoppelde/vertrouwde apparaten blijven bewaard."
 
-#: src/shell/qml/SettingsPage.qml:363
+#: src/shell/qml/SettingsPage.qml:371
 msgid "Reset"
 msgstr "Standaardwaarden"
 
-#: src/shell/qml/SettingsPage.qml:369
+#: src/shell/qml/SettingsPage.qml:377
 msgid "Reset preferences…"
 msgstr "Instellingen herstellen…"
 
-#: src/shell/qml/SettingsPage.qml:370
+#: src/shell/qml/SettingsPage.qml:378
 msgid "Go back to the default preferences"
 msgstr "Zet de standaardwaarden van alle instellingen terug"
 

@@ -21,6 +21,7 @@ private Q_SLOTS:
         qputenv("XDG_CONFIG_HOME", (m_dir.path() + QStringLiteral("/config")).toUtf8());
         qputenv("HOME", m_dir.path().toUtf8());
         qputenv("APPIMAGE", image.toUtf8());
+        qputenv("XDG_CURRENT_DESKTOP", "KDE");
         // The test binary plays the program inside the AppImage.
         qputenv("APPDIR", QCoreApplication::applicationDirPath().toUtf8());
     }
@@ -45,6 +46,12 @@ private Q_SLOTS:
         QVERIFY(!Integration::shouldAsk(false));
     }
 
+    void neverAsksWithoutADesktop()
+    {
+        qunsetenv("XDG_CURRENT_DESKTOP");
+        QVERIFY(!Integration::shouldAsk(false));
+    }
+
     void neverAsksWhenAlreadyIntegrated()
     {
         QVERIFY(Integration::installMenuEntry());
@@ -59,6 +66,17 @@ private Q_SLOTS:
         QDir().mkpath(m_dir.path() + QStringLiteral("/data/kio/servicemenus"));
         QVERIFY(QFile(m_dir.path() + QStringLiteral("/data/kio/servicemenus/kuickshare-send.desktop")).open(QIODevice::WriteOnly));
         QVERIFY(!Integration::shouldAsk(false));
+    }
+
+    void theMenuEntryCanBeRemovedAgain()
+    {
+        QVERIFY(!Integration::menuEntryExists());
+        QVERIFY(Integration::installMenuEntry());
+        QVERIFY(Integration::menuEntryExists());
+        QVERIFY(Integration::removeMenuEntry());
+        QVERIFY(!Integration::menuEntryExists());
+        QVERIFY(!QFileInfo::exists(m_dir.path() + QStringLiteral("/data/icons/hicolor/scalable/apps/io.github.the_beper.KuickShare.svg")));
+        QVERIFY(Integration::removeMenuEntry());
     }
 
     void theMenuEntryPointsAtTheAppImageAndBringsItsIcons()

@@ -519,6 +519,29 @@ void CoreBridge::setDolphinIntegration(bool enabled)
     setRemoteProperty(QStringLiteral("DolphinIntegration"), enabled);
 }
 
+bool CoreBridge::appImage() const
+{
+    return Launcher::inAppImage();
+}
+
+bool CoreBridge::menuEntry() const
+{
+    return Integration::menuEntryExists();
+}
+
+void CoreBridge::setMenuEntry(bool enabled)
+{
+    if (enabled == menuEntry()) {
+        return;
+    }
+    if (!(enabled ? Integration::installMenuEntry() : Integration::removeMenuEntry())) {
+        emit errorOccurred(i18n("Could not update the application menu"));
+    } else {
+        Integration::markAsked();
+    }
+    emit menuEntryChanged();
+}
+
 void CoreBridge::integrateAppImage()
 {
     if (!Integration::installMenuEntry() || !DolphinMenu::setEnabled(true)) {
@@ -527,6 +550,7 @@ void CoreBridge::integrateAppImage()
         return;
     }
     Integration::markAsked();
+    emit menuEntryChanged();
     // The Dolphin entry now exists whatever the setting was, so the setting must say on.
     m_dolphinIntegration = true;
     emit dolphinIntegrationChanged();

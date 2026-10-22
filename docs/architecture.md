@@ -328,7 +328,7 @@ Not covered by automated tests:
 - Pairing between two real computers; it is tested over loopback only.
 - `CoreBridge`, notifications, progress jobs and the QML UI, beyond `qmllint`.
 - The Flatpak: only the headless smoke test above. Notifications, job progress, the file chooser and Dolphin reading the entry are unverified.
-- The AppImage: `build/appimage/test-appimage.sh` is a headless smoke test in bare containers. Following the desktop theme, tray, notifications, file dialogs, GPU rendering, Wayland and the first-launch dialog are unverified on a real desktop. The tarball installer: `build/test-tarball.sh`, also headless.
+- The AppImage: `build/appimage/test-appimage.sh` is a headless smoke test in bare containers (Debian, Alpine, NixOS, and Ubuntu 22.04 under Xvfb without Wayland: the main window appears within 10 s). Following the desktop theme, tray, notifications, file dialogs, GPU rendering, Wayland and the first-launch dialog are unverified on a real desktop. The tarball installer: `build/test-tarball.sh`, also headless.
 
 ## Packaging
 
@@ -355,9 +355,9 @@ Built the [Anylinux](https://github.com/pkgforge-dev/Anylinux-AppImages) way, in
 - **Direct run.** The hook `build/appimage/anylinux.hook` (installed as `bin/00-kuickshare.hook`) lets a plain start run the bundled `kuickshare`. It sets `QT_QPA_PLATFORMTHEME=kde` (the bundle holds the Plasma platform theme and Breeze icons) so the app follows the host's theme, read from the host's `~/.config`.
 - **Core.** `kuickshared` is started by the shell from its own folder. In the bundle it is a small script that runs the real binary (renamed `kuickshared-core`) through `sharun`, so it uses the bundled libc.
 - **`$APPIMAGE`.** The AppImage runs from a temporary mount, so `Launcher::inAppImage()` (`src/shell/launcher.h`; `APPIMAGE` names an existing file and the program is inside `APPDIR`, so a tarball installation started from a terminal that inherited `APPIMAGE` is not taken for the AppImage) makes the Dolphin, autostart and menu entries point at the `$APPIMAGE` file. Nothing is written by itself: the first start asks once (`src/shell/integration.cpp`, `IntegrationDialog.qml`), and the Preferences toggles write entries on demand.
-- **Updates.** `appimagetool` embeds `gh-releases-zsync|the-beper|KuickShare|latest|KuickShare-*-x86_64.AppImage.zsync` and writes the `.zsync` file, which the release publishes.
+- **Updates.** `appimagetool` embeds `gh-releases-zsync|the-beper|KuickShare|latest|KuickShare-x86_64.AppImage.zsync` and writes the `.zsync` file, which the release publishes.
 - **Cache.** The Podman volume `kuickshare-appimage` keeps the cargo registry; each build uses a fresh `TMPDIR` because `quick-sharun` does not re-check cached files.
-- **Test.** `build/appimage/test-appimage.sh` runs the AppImage with `--appimage-extract-and-run` (no FUSE) in bare Debian, Alpine and `nixos/nix` containers with only `dbus`: the core answers on D-Bus, no QML or plugin errors, only its own data is written, and a second launch hands its files over.
+- **Test.** `build/appimage/test-appimage.sh` runs the AppImage with `--appimage-extract-and-run` (no FUSE) in bare Debian, Alpine and `nixos/nix` containers with only `dbus` (plus Ubuntu 22.04 with Xvfb and no Wayland: the main window appears within 10 s): the core answers on D-Bus, no QML or plugin errors, only its own data is written, and a second launch hands its files over.
 
 ### Tarball
 

@@ -41,20 +41,20 @@ Both entries start the app through `flatpak run`. The app finds the host folders
 
 ### AppImage
 
-A normal, self-contained AppImage: it brings its own libraries and runs on any distribution, including NixOS and musl ones. Running it starts KuickShare and installs nothing.
+A normal, self-contained AppImage: it brings its own libraries and runs on any distribution, including NixOS and musl ones. Running it starts KuickShare and installs nothing. The latest release is always at `https://github.com/the-beper/KuickShare/releases/latest/download/KuickShare-x86_64.AppImage`.
 
 ```sh
-chmod +x KuickShare-<version>-x86_64.AppImage
-./KuickShare-<version>-x86_64.AppImage
+chmod +x KuickShare-x86_64.AppImage
+./KuickShare-x86_64.AppImage
 ```
 
 It can be managed with the usual tools ([Gear Lever](https://github.com/mijorus/gearlever), [AM / AppMan](https://github.com/ivan-hc/AM), [soar](https://github.com/pkgforge/soar)) and updates with `appimageupdatetool` or any updater that reads its embedded update information (zsync, GitHub releases).
 
-On the first start it asks once whether to add KuickShare to the application menu and Dolphin's context menu. "Add" writes the menu entry and the Dolphin entry, both pointing at the AppImage file (if you move the file, turn the Dolphin entry off and on again in Preferences); "Not now" turns the Dolphin entry off in Preferences. Nothing is asked if an installation or those entries already exist, or if the app starts with `--background`. The answer is remembered in `~/.config/kuickshare/integration-asked`; to remove the menu entry delete `~/.local/share/applications/io.github.the_beper.KuickShare.desktop` and the icons it installed.
+On the first start it asks once whether to add KuickShare to the application menu and Dolphin's context menu. "Add" writes the menu entry and the Dolphin entry, both pointing at the AppImage file (if you move the file, turn the Dolphin entry off and on again in Preferences); "Not now" turns the Dolphin entry off in Preferences. The Preferences have an "Application menu entry" switch (AppImage only) that adds or removes the menu entry at any time, so it also works where the question is not asked. Nothing is asked if an installation or those entries already exist, if the app starts with `--background`, or if `XDG_CURRENT_DESKTOP` is not set (a bare session such as Xvfb). The answer is remembered in `~/.config/kuickshare/integration-asked`; to remove the menu entry delete `~/.local/share/applications/io.github.the_beper.KuickShare.desktop` and the icons it installed.
 
 | Command | Effect |
 |---|---|
-| `KuickShare.AppImage [file...]` | Start the app; the files are queued on the Send page |
+| `KuickShare-x86_64.AppImage [file...]` | Start the app; the files are queued on the Send page |
 
 To install KuickShare into `~/.local` with the system's libraries instead, use the tarball (below).
 

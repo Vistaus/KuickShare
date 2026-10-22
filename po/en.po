@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kuickshare 1.0.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-20 16:56+0000\n"
+"POT-Creation-Date: 2026-10-22 10:30+0000\n"
 "PO-Revision-Date: 2026-10-18 00:00+0000\n"
 "Last-Translator: the-beper <193650145+the-beper@users.noreply.github.com>\n"
 "Language-Team: English\n"
@@ -20,11 +20,15 @@ msgstr ""
 msgid "Could not update Dolphin's context menu"
 msgstr "Could not update Dolphin's context menu"
 
-#: src/shell/corebridge.cpp:526
+#: src/shell/corebridge.cpp:538
+msgid "Could not update the application menu"
+msgstr "Could not update the application menu"
+
+#: src/shell/corebridge.cpp:549
 msgid "Could not add KuickShare to the menus"
 msgstr "Could not add KuickShare to the menus"
 
-#: src/shell/corebridge.cpp:622
+#: src/shell/corebridge.cpp:646
 msgid ""
 "The Flatpak has no access to %1. Allow it with: flatpak override --user --"
 "filesystem=\"%1\" %2"
@@ -32,11 +36,11 @@ msgstr ""
 "The Flatpak has no access to %1. Allow it with: flatpak override --user --"
 "filesystem=\"%1\" %2"
 
-#: src/shell/corebridge.cpp:669
+#: src/shell/corebridge.cpp:693
 msgid "Could not update the autostart entry"
 msgstr "Could not update the autostart entry"
 
-#: src/shell/corebridge.cpp:763
+#: src/shell/corebridge.cpp:787
 msgid "Only files can be shared, folders are not supported"
 msgstr "Only files can be shared, folders are not supported"
 
@@ -699,7 +703,15 @@ msgstr "Dolphin context menu"
 msgid "Add “Send with KuickShare” to the menu of files"
 msgstr "Add “Send with KuickShare” to the menu of files"
 
+#: src/shell/qml/SettingsPage.qml:333
+msgid "Application menu entry"
+msgstr "Application menu entry"
+
 #: src/shell/qml/SettingsPage.qml:334
+msgid "Add KuickShare to the application menu"
+msgstr "Add KuickShare to the application menu"
+
+#: src/shell/qml/SettingsPage.qml:342
 msgid ""
 "Without the tray icon, closing the window quits KuickShare, and nothing can "
 "be received until you open it again. At login it starts hidden: open "
@@ -709,11 +721,11 @@ msgstr ""
 "be received until you open it again. At login it starts hidden: open "
 "KuickShare again to show the window."
 
-#: src/shell/qml/SettingsPage.qml:347
+#: src/shell/qml/SettingsPage.qml:355
 msgid "firewalld is not running"
 msgstr "firewalld is not running"
 
-#: src/shell/qml/SettingsPage.qml:348
+#: src/shell/qml/SettingsPage.qml:356
 msgid ""
 "firewalld is not running, so the firewall cannot be opened for a single "
 "port. While the hotspot is up, the phone that joins it can reach every "
@@ -723,11 +735,11 @@ msgstr ""
 "port. While the hotspot is up, the phone that joins it can reach every "
 "service on this computer. Turn it on anyway?"
 
-#: src/shell/qml/SettingsPage.qml:356
+#: src/shell/qml/SettingsPage.qml:364
 msgid "Reset preferences?"
 msgstr "Reset preferences?"
 
-#: src/shell/qml/SettingsPage.qml:357
+#: src/shell/qml/SettingsPage.qml:365
 msgid ""
 "Every setting goes back to its default. The history and the paired and "
 "trusted devices are kept."
@@ -735,15 +747,15 @@ msgstr ""
 "Every setting goes back to its default. The history and the paired and "
 "trusted devices are kept."
 
-#: src/shell/qml/SettingsPage.qml:363
+#: src/shell/qml/SettingsPage.qml:371
 msgid "Reset"
 msgstr "Reset"
 
-#: src/shell/qml/SettingsPage.qml:369
+#: src/shell/qml/SettingsPage.qml:377
 msgid "Reset preferences…"
 msgstr "Reset preferences…"
 
-#: src/shell/qml/SettingsPage.qml:370
+#: src/shell/qml/SettingsPage.qml:378
 msgid "Go back to the default preferences"
 msgstr "Go back to the default preferences"
 

@@ -1,9 +1,11 @@
 #!/bin/sh
 # Smoke test of the self-contained AppImage in throw-away containers, offscreen Qt, private session bus.
 # Bare distros (no Qt, no KF6, only dbus and fonts): debian:stable-slim, alpine (musl), nixos/nix (no FHS):
+#   - ubuntu (22.04, Xvfb, no Wayland): the main window appears within 10 s, so the xcb platform plugin and the
+#     libraries Qt dlopens for it (libxkbcommon-x11, libxcb-xkb) are in the bundle
 #   - direct launch: the core answers on D-Bus (DeviceName), no QML errors, no files outside the app's own
 #     settings/data under HOME, a second launch hands its file to the running instance
-# Usage: build/appimage/test-appimage.sh dist/KuickShare-<version>-x86_64.AppImage [debian alpine nix]
+# Usage: build/appimage/test-appimage.sh dist/KuickShare-x86_64.AppImage [debian alpine nix ubuntu]
 # Needs no FUSE: the AppImage runs with --appimage-extract-and-run. Nothing is installed on the host.
 set -eu
 
@@ -11,7 +13,7 @@ if [ ! -e /run/.containerenv ]; then
     root=$(cd "$(dirname "$0")/../.." && pwd)
     appimage=$(readlink -f "$1")
     shift
-    [ $# -gt 0 ] || set -- debian alpine nix
+    [ $# -gt 0 ] || set -- debian alpine nix ubuntu
     failed=
     for target in "$@"; do
         case $target in
@@ -21,6 +23,8 @@ if [ ! -e /run/.containerenv ]; then
                 setup='apk add --no-cache -q dbus ttf-dejavu' ;;
             nix) image=docker.io/nixos/nix:latest
                 setup='nix-env -iA nixpkgs.dbus nixpkgs.dejavu_fonts nixpkgs.gnused nixpkgs.gnugrep >/dev/null 2>&1' ;;
+            ubuntu) image=docker.io/library/ubuntu:22.04
+                setup='export DEBIAN_FRONTEND=noninteractive; apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq dbus fonts-dejavu-core xvfb libgl1-mesa-dri libegl1 x11-utils >/dev/null' ;;
             *) echo "unknown target $target" >&2; exit 2 ;;
         esac
         echo "=== $target ($image)"
@@ -77,3 +81,20 @@ bad=$(files | grep -v -E '^\./\.(local/share|config)/kuickshare/|^\./(app\.log|h
 ok "wrote only its own data: $(files | grep -c kuickshare) files"
 kill "$pid" 2>/dev/null || true
 wait "$pid" 2>/dev/null || true
+for _ in $(seq 10); do owner >/dev/null 2>&1 || break; sleep 1; done
+
+if command -v Xvfb >/dev/null; then
+    newhome
+    unset WAYLAND_DISPLAY QT_QPA_PLATFORM
+    Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
+    xpid=$!
+    for _ in $(seq 10); do DISPLAY=:99 xwininfo -root >/dev/null 2>&1 && break; sleep 1; done
+    ! owner >/dev/null 2>&1 || fail "the first instance is still running"
+    DISPLAY=:99 "$app" >"$HOME/app.log" 2>&1 &
+    pid=$!
+    for _ in $(seq 10); do DISPLAY=:99 xwininfo -root -tree | grep -q '"KuickShare"' && break; sleep 1; done
+    DISPLAY=:99 xwininfo -root -tree | grep -q '"KuickShare"' || { cat "$HOME/app.log"; fail "no window under Xvfb within 10 s"; }
+    ok "window shown under Xvfb"
+    kill "$pid" "$xpid" 2>/dev/null || true
+    wait "$pid" "$xpid" 2>/dev/null || true
+fi

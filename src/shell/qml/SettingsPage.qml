@@ -327,6 +327,14 @@ FormCard.FormCardPage {
             enabled: page.core.connected
             onToggled: page.core.dolphinIntegration = checked
         }
+        FormCard.FormSwitchDelegate {
+            visible: page.core.appImage
+            icon.name: "application-menu-symbolic"
+            text: i18n("Application menu entry")
+            description: i18n("Add KuickShare to the application menu")
+            checked: page.core.menuEntry
+            onToggled: page.core.menuEntry = checked
+        }
     }
     Kirigami.InlineMessage {
         visible: page.core.connected && !page.core.trayIcon

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kuickshare 1.0.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-20 16:56+0000\n"
+"POT-Creation-Date: 2026-10-22 10:30+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -22,21 +22,25 @@ msgstr ""
 msgid "Could not update Dolphin's context menu"
 msgstr ""
 
-#: src/shell/corebridge.cpp:526
+#: src/shell/corebridge.cpp:538
+msgid "Could not update the application menu"
+msgstr ""
+
+#: src/shell/corebridge.cpp:549
 msgid "Could not add KuickShare to the menus"
 msgstr ""
 
-#: src/shell/corebridge.cpp:622
+#: src/shell/corebridge.cpp:646
 msgid ""
 "The Flatpak has no access to %1. Allow it with: flatpak override --user --"
 "filesystem=\"%1\" %2"
 msgstr ""
 
-#: src/shell/corebridge.cpp:669
+#: src/shell/corebridge.cpp:693
 msgid "Could not update the autostart entry"
 msgstr ""
 
-#: src/shell/corebridge.cpp:763
+#: src/shell/corebridge.cpp:787
 msgid "Only files can be shared, folders are not supported"
 msgstr ""
 
@@ -670,43 +674,51 @@ msgstr ""
 msgid "Add “Send with KuickShare” to the menu of files"
 msgstr ""
 
+#: src/shell/qml/SettingsPage.qml:333
+msgid "Application menu entry"
+msgstr ""
+
 #: src/shell/qml/SettingsPage.qml:334
+msgid "Add KuickShare to the application menu"
+msgstr ""
+
+#: src/shell/qml/SettingsPage.qml:342
 msgid ""
 "Without the tray icon, closing the window quits KuickShare, and nothing can "
 "be received until you open it again. At login it starts hidden: open "
 "KuickShare again to show the window."
 msgstr ""
 
-#: src/shell/qml/SettingsPage.qml:347
+#: src/shell/qml/SettingsPage.qml:355
 msgid "firewalld is not running"
 msgstr ""
 
-#: src/shell/qml/SettingsPage.qml:348
+#: src/shell/qml/SettingsPage.qml:356
 msgid ""
 "firewalld is not running, so the firewall cannot be opened for a single "
 "port. While the hotspot is up, the phone that joins it can reach every "
 "service on this computer. Turn it on anyway?"
 msgstr ""
 
-#: src/shell/qml/SettingsPage.qml:356
+#: src/shell/qml/SettingsPage.qml:364
 msgid "Reset preferences?"
 msgstr ""
 
-#: src/shell/qml/SettingsPage.qml:357
+#: src/shell/qml/SettingsPage.qml:365
 msgid ""
 "Every setting goes back to its default. The history and the paired and "
 "trusted devices are kept."
 msgstr ""
 
-#: src/shell/qml/SettingsPage.qml:363
+#: src/shell/qml/SettingsPage.qml:371
 msgid "Reset"
 msgstr ""
 
-#: src/shell/qml/SettingsPage.qml:369
+#: src/shell/qml/SettingsPage.qml:377
 msgid "Reset preferences…"
 msgstr ""
 
-#: src/shell/qml/SettingsPage.qml:370
+#: src/shell/qml/SettingsPage.qml:378
 msgid "Go back to the default preferences"
 msgstr ""
 
