@@ -181,8 +181,8 @@ msgid ""
 "Keep “Visible to nearby devices” on in Preferences. The phone must be set to "
 "Everyone to be found, and Android sets it back after 10 minutes."
 msgstr ""
-"Tercihler menüsünden "Yakındaki cihazlara görün" seçeneğini açın. Telefonun "
-"Herkes paylaşım yapabilsin" ayarlanmalı (android bu ayarı 10Dk sonra eski haline döndürür)."
+"Tercihler menüsünden “Yakındaki cihazlara görün” seçeneğini açın. Telefonun "
+"“Herkes paylaşım yapabilsin” ayarlanmalı (android bu ayarı 10Dk sonra eski haline döndürür)."
 
 #: src/shell/qml/HelpPage.qml:41
 msgid "Receive"
