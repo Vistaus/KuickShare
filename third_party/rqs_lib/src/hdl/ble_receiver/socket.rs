@@ -9,7 +9,6 @@ const CONTROL_HASH: [u8; 3] = [0; 3];
 const CTRL_INTRODUCTION: u8 = 1;
 const CTRL_DISCONNECTION: u8 = 2;
 /// Socket version announced in our INTRODUCTION.
-#[cfg(test)]
 const SOCKET_VERSION: u8 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,7 +73,6 @@ pub fn data_message(data: &[u8]) -> Vec<u8> {
 
 /// `00 00 00 | 08 01 | 12 07 | 0a 03 <hash> | 10 02`: type INTRODUCTION with
 /// {service_id_hash, socket_version}.
-#[cfg(test)]
 pub fn introduction_message() -> Vec<u8> {
     let mut m = CONTROL_HASH.to_vec();
     m.extend_from_slice(&[0x08, CTRL_INTRODUCTION, 0x12, 0x07, 0x0a, 0x03]);
@@ -83,7 +81,6 @@ pub fn introduction_message() -> Vec<u8> {
     m
 }
 
-#[cfg(test)]
 pub fn disconnection_message() -> Vec<u8> {
     let mut m = CONTROL_HASH.to_vec();
     m.extend_from_slice(&[0x08, CTRL_DISCONNECTION]);

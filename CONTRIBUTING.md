@@ -72,7 +72,7 @@ The feature needs a real adapter and phone and cannot run in CI. Build with `bui
 - Receiving needs the `dnsmasq` package on the host: NetworkManager runs it to give the phone an address on the hotspot. Neither direction needs privileges.
 - Write the daemon log to a file: `RUST_LOG=info,rqs_lib::hdl::ble_receiver=debug,rqs_lib::upgrade=debug target/debug/kuickshared > kuickshared.log 2>&1` (it logs to stdout), and capture Bluetooth with `sudo btmon -w capture.btsnoop`.
 - The phone's side is in `adb logcat -s NearbyConnections NearbyMediums NearbySharing WifiP2pService` (USB debugging on).
-- Individual steps have `#[ignore]` tests: run `cargo test -p rqs_lib --no-run` (inside the container; the printed path is the test binary) and execute it on the host with `--ignored --nocapture <name>` (`probe_nearby_phones`, `send_small_file_to_phone`, `observe_upgrade_offer`, `send_through_rqs_api`).
+- Individual steps have `#[ignore]` tests: run `cargo test -p rqs_lib --no-run` (inside the container; the printed path is the test binary) and execute it on the host with `--ignored --nocapture <name>` (`probe_nearby_phones`, `send_small_file_to_phone`, `observe_upgrade_offer`, `send_through_rqs_api`, `gatt_connection_confirm`). `KS_ENDPOINT` picks the phone; `KS_TRANSPORT=gatt` makes `send_small_file_to_phone` use GATT instead of L2CAP. Quick Share must show the Receive screen on the phone, and a Samsung phone may advertise only in short bursts.
 
 ## Code style
 

@@ -5,14 +5,15 @@
 //! and turns each [`ScanEvent`] into an `EndpointInfo` with id `ble:<endpoint_id>` and
 //! `present` set from `Found`/`Gone`. One [`Dedup`] lives as long as the process, so devices
 //! that vanish between two windows are reported. [`BleScanner::send`] scans again for the
-//! target (its address and PSM rotate at every scan), dials it and runs the send session.
+//! target (its address and PSM rotate at every scan), dials it (L2CAP, or GATT when the phone
+//! advertises no PSM) and runs the send session.
 //!
 //! The scan must NEVER run continuously: a permanent BlueZ discovery blocks the reconnection
 //! of bonded LE devices (rquickshare #429). Hence a bounded window, a minimum interval, and
 //! one lock shared with the send: no scan while a dial or a transfer is going on.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
@@ -25,7 +26,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::ble_receiver::service_data::{ReceiverAdvertisement, SERVICE_UUID};
 use super::ble_send::dial::dial_l2cap;
-use super::ble_send::send_over_l2cap;
+use super::ble_send::gatt_dial::dial_gatt;
+use super::ble_send::{send_over_gatt, send_over_l2cap};
 use super::{BleTarget, EndpointInfo, OutboundPayload};
 use crate::DeviceType;
 use crate::channel::ChannelMessage;
@@ -309,7 +311,9 @@ async fn open_adapter() -> anyhow::Result<(bluer::Session, Adapter)> {
     Ok((session, adapter))
 }
 
-/// Scans until `target` shows up with a PSM; the scan is over when this returns.
+/// Scans until `target` shows up with a PSM, which ends the scan at once. A sighting without a
+/// PSM is kept and returned at the end of the window: the phone is then reached over GATT.
+/// The scan is over when this returns.
 async fn find_target(
     adapter: &Adapter,
     target: BleTarget,
@@ -318,11 +322,14 @@ async fn find_target(
 ) -> anyhow::Result<ScanResult> {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut dedup = Dedup::default();
-    let without_psm = AtomicBool::new(false);
+    let without_psm: Mutex<Option<ScanResult>> = Mutex::new(None);
     let scan = scan_window(adapter, window, &mut dedup, |event| {
         if let ScanEvent::Found(r) = &event {
-            if r.endpoint_id == target.endpoint_id && r.psm.is_none() {
-                without_psm.store(true, Ordering::Relaxed);
+            if r.endpoint_id == target.endpoint_id
+                && r.psm.is_none()
+                && let Ok(mut kept) = without_psm.lock()
+            {
+                *kept = Some(r.clone());
             }
             debug!(
                 "rescan sees {} (PSM {:?}, {} dBm), wanted {}",
@@ -344,19 +351,15 @@ async fn find_target(
         Some(found) = rx.recv() => Ok(found),
         r = &mut scan => {
             r?;
-            rx.try_recv().map_err(|_| {
-                if without_psm.load(Ordering::Relaxed) {
-                    anyhow::anyhow!(
-                        "{} is visible but its advertisement has no Bluetooth L2CAP channel (PSM); it may offer GATT only, which KuickShare cannot send over yet",
-                        target.id()
-                    )
-                } else {
+            rx.try_recv()
+                .ok()
+                .or_else(|| without_psm.lock().ok().and_then(|kept| kept.clone()))
+                .ok_or_else(|| {
                     anyhow::anyhow!(
                         "{} not seen within {window:?}: is Quick Share open on it, visible to Everyone?",
                         target.id()
                     )
-                }
-            })
+                })
         }
         () = ctk.cancelled() => bail!("cancelled while looking for {}", target.id()),
     }
@@ -408,7 +411,8 @@ impl BleScanner {
     }
 
     /// Scans for `target` again (its address and PSM changed since the last window), stops the
-    /// scan, dials it and runs the send session, holding the scan slot all along.
+    /// scan, dials it (L2CAP when it advertises a PSM, GATT otherwise) and runs the send
+    /// session, holding the scan slot all along.
     #[allow(clippy::too_many_arguments)]
     pub async fn send(
         &self,
@@ -426,8 +430,14 @@ impl BleScanner {
         };
         let (_session, adapter) = open_adapter().await?;
         let scan = find_target(&adapter, target, RESCAN_WINDOW, &ctk).await?;
-        let stream = dial_l2cap(&adapter, &scan).await?;
-        send_over_l2cap(stream, local_endpoint_id, id, name, payload, sender, ctk).await?;
+        if scan.psm.is_some() {
+            let stream = dial_l2cap(&adapter, &scan).await?;
+            send_over_l2cap(stream, local_endpoint_id, id, name, payload, sender, ctk).await?;
+        } else {
+            debug!("{} advertises no PSM: sending over GATT", target.id());
+            let link = dial_gatt(&adapter, &scan).await?;
+            send_over_gatt(link, local_endpoint_id, id, name, payload, sender, ctk).await?;
+        }
         Ok(())
     }
 }
@@ -482,7 +492,7 @@ mod hardware_probe {
             .unwrap_or(3072);
         let path = std::env::temp_dir().join(format!("kuickshare-rqs-{}.bin", std::process::id()));
         let mut data = vec![0u8; kb * 1024];
-        rand::RngCore::fill_bytes(&mut rand::rng(), &mut data);
+        rand::Rng::fill_bytes(&mut rand::rng(), &mut data);
         std::fs::write(&path, data).expect("write the temp file");
 
         let (offer_tx, mut offer_rx) = tokio::sync::mpsc::unbounded_channel();

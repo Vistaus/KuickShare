@@ -24,9 +24,11 @@ use crate::manager::drive_inbound;
 /// Slot 0: the advertisement, readable once connected.
 const SLOT0_UUID: Uuid = Uuid::from_u128(0x0000_0000_0000_3000_8000_0000_0000_0000);
 /// Phone to us, write with response.
-const TO_PERIPHERAL_UUID: Uuid = Uuid::from_u128(0x0000_0100_0004_1000_8000_001a_1100_0101);
+pub(crate) const TO_PERIPHERAL_UUID: Uuid =
+    Uuid::from_u128(0x0000_0100_0004_1000_8000_001a_1100_0101);
 /// Us to phone, notify and indicate.
-const FROM_PERIPHERAL_UUID: Uuid = Uuid::from_u128(0x0000_0100_0004_1000_8000_001a_1100_0102);
+pub(crate) const FROM_PERIPHERAL_UUID: Uuid =
+    Uuid::from_u128(0x0000_0100_0004_1000_8000_001a_1100_0102);
 
 /// Writes queued for the bridge; a full queue delays the write response, which is the
 /// backpressure on the phone.

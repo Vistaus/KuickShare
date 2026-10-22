@@ -120,7 +120,20 @@ impl TcpServer {
     /// To be called inside a separate task if we want to handle concurrency
     pub async fn connect(&self, ctk: CancellationToken, si: SendInfo) -> Result<(), anyhow::Error> {
         if let Some(target) = si.ble_target() {
-            return self.connect_ble(ctk, si, target).await;
+            let id = si.id.clone();
+            let result = self.connect_ble(ctk, si, target).await;
+            if result.is_err() {
+                // The app waits for a first event of this transfer: tell it now that none will come.
+                let _ = self.sender.send(ChannelMessage {
+                    id,
+                    msg: channel::Message::Client(MessageClient {
+                        kind: TransferKind::Outbound,
+                        state: Some(TransferState::Disconnected),
+                        metadata: Default::default(),
+                    }),
+                });
+            }
+            return result;
         }
         debug!("{INNER_NAME}: Connecting to: {}", si.addr);
         let socket = TcpStream::connect(si.addr.clone()).await?;
@@ -246,7 +259,7 @@ mod tests {
         let _guard = SERIAL.lock().await;
         *crate::WIFI_LINK.write().unwrap() = None;
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let (bus, _rx) = tokio::sync::broadcast::channel(4);
+        let (bus, mut rx) = tokio::sync::broadcast::channel(4);
         let (_tx, unused) = tokio::sync::mpsc::channel(1);
         let server = TcpServer::new(*b"TEST", listener, bus, unused).unwrap();
         let err = server
@@ -254,6 +267,13 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Wi-Fi upgrade"), "{err}");
+        // The failure is also reported on the bus, so the app need not wait for its watchdog.
+        let message = rx.try_recv().unwrap();
+        assert_eq!(message.id, "ble:G483");
+        let channel::Message::Client(client) = message.msg else {
+            panic!("expected a client message");
+        };
+        assert_eq!(client.state, Some(TransferState::Disconnected));
     }
 
     #[tokio::test]

@@ -180,7 +180,7 @@ void TransferWatcher::onTransferChanged(const QString &id)
         // The library reports a refusal by the other device as "Disconnected"; before any data
         // moved that is the most likely reason (it can also be a full disk or a timeout).
         const QString reason = id.startsWith(QLatin1String("ble:"))
-                                   ? i18n("%1 declined the transfer, could not receive it or was not reachable over Bluetooth", who.toHtmlEscaped())
+                                   ? i18n("Could not start the transfer to %1 over Bluetooth. The device must show Quick Share's receive screen, and some phones cannot be sent to over Bluetooth yet", who.toHtmlEscaped())
                                    : i18n("%1 declined the transfer or could not receive it", who.toHtmlEscaped());
         notifyProblem(QStringLiteral("transferFailed"), i18n("Transfer not accepted"), reason);
     }

@@ -127,7 +127,7 @@ async fn dial(adapter: &Adapter, scan: &ScanResult) -> Result<Stream, DialError>
 }
 
 /// Disconnects the ACL link BlueZ holds to the phone, if any.
-async fn drop_stale_link(adapter: &Adapter, scan: &ScanResult) -> Result<(), DialError> {
+pub(super) async fn drop_stale_link(adapter: &Adapter, scan: &ScanResult) -> Result<(), DialError> {
     let device = adapter
         .device(scan.address)
         .map_err(|e| DialError::Adapter(e.to_string()))?;
@@ -243,7 +243,9 @@ pub(crate) mod hardware_probe {
     use crate::hdl::OutboundPayload;
     use crate::hdl::TransferState;
     use crate::hdl::ble_scan::{Dedup, SCAN_WINDOW, ScanEvent, scan_window};
-    use crate::hdl::ble_send::send_over_l2cap;
+    use crate::hdl::ble_send::bridge::BridgeExit;
+    use crate::hdl::ble_send::gatt_dial::dial_gatt;
+    use crate::hdl::ble_send::{send_over_gatt, send_over_l2cap};
     use crate::upgrade::tests::SERIAL;
     use crate::upgrade::{BoxFuture, WifiCredentials, WifiLink};
 
@@ -316,7 +318,8 @@ pub(crate) mod hardware_probe {
     /// Hand test on a real adapter and phone: open Quick Share on the phone (Everyone), then
     /// run `cargo test -p rqs_lib --no-run`, and execute the printed test binary on the host
     /// with `--ignored --nocapture send_small_file_to_phone`. Env: `KS_ENDPOINT` (4 character
-    /// endpoint id of the phone to use), `KS_FILE` (file to send instead of 8 KB of text).
+    /// endpoint id of the phone to use), `KS_FILE` (file to send instead of 8 KB of text),
+    /// `KS_TRANSPORT=gatt` (send over GATT even if the phone advertises a PSM).
     /// Press Accept on the phone when it asks.
     #[tokio::test]
     #[ignore = "needs a BlueZ adapter and a phone in Receive mode"]
@@ -343,22 +346,37 @@ pub(crate) mod hardware_probe {
         step(&format!("sending {path}"));
 
         step("dialing");
-        let stream = dial_l2cap(&adapter, &scan).await.expect("dial");
-        step("channel up; waiting for the phone to accept");
-
+        let gatt = std::env::var("KS_TRANSPORT").is_ok_and(|v| v == "gatt");
         let (tx, rx) = broadcast::channel::<ChannelMessage>(256);
-        let printer = spawn_printer(rx, started);
-
         let ctk = CancellationToken::new();
-        let send = send_over_l2cap(
-            stream,
-            *b"KSPR",
-            "ks-probe".into(),
-            scan.name.clone(),
-            OutboundPayload::Files(vec![path.clone()]),
-            tx.clone(),
-            ctk.clone(),
-        );
+        let payload = OutboundPayload::Files(vec![path.clone()]);
+        let send: std::pin::Pin<Box<dyn Future<Output = anyhow::Result<BridgeExit>> + Send>> =
+            if gatt {
+                let link = dial_gatt(&adapter, &scan).await.expect("dial GATT");
+                step("GATT link up; waiting for the phone to accept");
+                Box::pin(send_over_gatt(
+                    link,
+                    *b"KSPR",
+                    "ks-probe".into(),
+                    scan.name.clone(),
+                    payload,
+                    tx.clone(),
+                    ctk.clone(),
+                ))
+            } else {
+                let stream = dial_l2cap(&adapter, &scan).await.expect("dial");
+                step("channel up; waiting for the phone to accept");
+                Box::pin(send_over_l2cap(
+                    stream,
+                    *b"KSPR",
+                    "ks-probe".into(),
+                    scan.name.clone(),
+                    payload,
+                    tx.clone(),
+                    ctk.clone(),
+                ))
+            };
+        let printer = spawn_printer(rx, started);
         let result = tokio::time::timeout(ACCEPT_TIME + Duration::from_secs(60), send).await;
         ctk.cancel();
         drop(tx);
@@ -367,7 +385,7 @@ pub(crate) mod hardware_probe {
             let _ = std::fs::remove_file(&path);
         }
         let exit = match result {
-            Ok(r) => r.expect("send_over_l2cap"),
+            Ok(r) => r.expect("send"),
             Err(_) => panic!("timed out: did the phone user press Accept within {ACCEPT_TIME:?}?"),
         };
         step(&format!("bridge exit {exit:?}, finished {finished}"));
@@ -403,7 +421,7 @@ pub(crate) mod hardware_probe {
         let path =
             std::env::temp_dir().join(format!("kuickshare-offer-{}.bin", std::process::id()));
         let mut data = vec![0u8; kb * 1024];
-        rand::RngCore::fill_bytes(&mut rand::rng(), &mut data);
+        rand::Rng::fill_bytes(&mut rand::rng(), &mut data);
         std::fs::write(&path, data).expect("write the temp file");
         let path = path.to_string_lossy().into_owned();
 

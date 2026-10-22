@@ -149,7 +149,8 @@ impl ReceiverAdvertisement {
             .to_owned();
 
         let token = array(tail, 0)?;
-        let mask = *tail.get(2).ok_or(ParseError::Truncated)?;
+        // Samsung's Quick Share ends the advertisement after the token: no mask, no PSM.
+        let mask = tail.get(2).copied().unwrap_or(0);
         let mut at = 3;
         let psm = if mask & MASK_PSM != 0 {
             at += 2;
@@ -280,6 +281,24 @@ mod tests {
         assert_eq!(ReceiverAdvertisement::parse(&b), Some(adv));
     }
 
+    /// Captured from a Galaxy A55 (Samsung Quick Share): the endpoint info carries 3 extra bytes
+    /// after the name and the advertisement ends with the token, with no mask byte at all.
+    #[test]
+    fn samsung_advertisement_without_mask_byte() {
+        const SAMSUNG: [u8; 61] = [
+            0x48, 0xfc, 0x9f, 0x5e, 0, 0, 0, 0x33, 0x23, 0xfc, 0x9f, 0x5e, b'Y', b'Q', b'I', b'Z',
+            0x22, 0x22, 0xa0, 0x67, 0x41, 0x08, 0x51, 0x41, 0x8d, 0xc0, 0xbf, 0xbf, 0xd8, 0xd9,
+            0x5f, 0xaf, 0xd0, 0x3e, 0x0d, b'G', b'a', b'l', b'a', b'x', b'y', b' ', b'A', b'5',
+            b'5', b' ', b'5', b'G', 0x02, 0x01, 0x01, 0xc0, 0x7a, 0xd6, 0x1d, 0x7f, 0xe6, 0, 0,
+            0x07, 0x59,
+        ];
+        let adv = ReceiverAdvertisement::parse(&SAMSUNG).expect("parsed");
+        assert_eq!(adv.endpoint_id, *b"YQIZ");
+        assert_eq!(adv.name, "Galaxy A55 5G");
+        assert_eq!(adv.psm, None);
+        assert_eq!(adv.rx_instant, None);
+    }
+
     #[test]
     fn psm_is_big_endian_after_the_mask() {
         let mut adv = ReceiverAdvertisement::new(*b"ABCD", 3, [0; 16], "x");
@@ -351,11 +370,11 @@ mod tests {
 
     #[test]
     fn every_truncation_of_the_capture_fails_cleanly() {
+        // Cut right after the token it is the Samsung form (no mask byte), which is valid.
+        let after_token = 8 + usize::from(CAPTURE[7]) + 2;
         for n in 0..CAPTURE.len() {
-            assert!(
-                ReceiverAdvertisement::try_parse(&CAPTURE[..n]).is_err(),
-                "{n}"
-            );
+            let parsed = ReceiverAdvertisement::try_parse(&CAPTURE[..n]);
+            assert_eq!(parsed.is_ok(), n == after_token, "{n}");
         }
         assert!(ReceiverAdvertisement::try_parse(&CAPTURE).is_ok());
     }

@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use rand::{Rng, distr::Alphanumeric};
+use rand::{RngExt, distr::Alphanumeric};
 use rqs_lib::upgrade::{BoxFuture, WifiCredentials, WifiLink};
 use tokio::{
     sync::{Mutex, MutexGuard},

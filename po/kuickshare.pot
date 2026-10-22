@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kuickshare 1.0.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-22 10:30+0000\n"
+"POT-Creation-Date: 2026-10-22 21:37+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -931,8 +931,9 @@ msgstr ""
 
 #: src/shell/transferwatcher.cpp:183
 msgid ""
-"%1 declined the transfer, could not receive it or was not reachable over "
-"Bluetooth"
+"Could not start the transfer to %1 over Bluetooth. The device must show "
+"Quick Share's receive screen, and some phones cannot be sent to over "
+"Bluetooth yet"
 msgstr ""
 
 #: src/shell/transferwatcher.cpp:184

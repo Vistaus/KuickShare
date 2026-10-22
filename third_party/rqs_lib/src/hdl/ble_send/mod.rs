@@ -1,4 +1,5 @@
-//! Sending to a phone over BLE L2CAP CoC; we are the central, the phone the receiver.
+//! Sending to a phone over BLE (L2CAP CoC or the GATT weave socket); we are the central, the
+//! phone the receiver.
 //!
 //! [`send_over_l2cap`] takes an already connected link and runs a whole send session on it:
 //! the data connection handshake, UKEY2, the transfer and the Wi-Fi upgrade that the phone
@@ -17,13 +18,20 @@
 pub mod bridge;
 #[cfg(all(feature = "experimental", target_os = "linux"))]
 pub mod dial;
+pub mod gatt_bridge;
+#[cfg(all(feature = "experimental", target_os = "linux"))]
+pub mod gatt_dial;
+#[cfg(test)]
+mod gatt_tests;
 pub mod l2cap;
 #[cfg(test)]
 mod tests;
+pub mod weave_central;
 
+use std::future::Future;
 use std::time::Duration;
 
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, DuplexStream};
 use tokio::sync::broadcast::Sender;
 use tokio_util::sync::CancellationToken;
 
@@ -33,10 +41,14 @@ use crate::hdl::{MigratableStream, OutboundPayload, OutboundRequest, TransferSta
 use crate::utils::RemoteDeviceInfo;
 
 use bridge::{BridgeExit, CentralBridge};
+use gatt_bridge::GattCentralBridge;
+pub use gatt_bridge::GattLink;
 
-const INNER_NAME: &str = "L2capSend";
+const INNER_NAME: &str = "BleSend";
 /// `BLE_L2CAP` of the connection request's `Medium` (not in the upgrade path enum).
 const BLE_L2CAP_MEDIUM: i32 = 10;
+/// `BLE` of the connection request's `Medium`: Nearby's GATT socket.
+const BLE_MEDIUM: i32 = 4;
 /// Buffer between the session and the bridge.
 const STREAM_BUFFER: usize = 256 * 1024;
 /// How long the bridge gets to flush after the session ended.
@@ -59,8 +71,61 @@ pub async fn send_over_l2cap<L>(
 where
     L: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    send_over_link(
+        BLE_L2CAP_MEDIUM,
+        |end| CentralBridge::new(link, end).run(),
+        endpoint_id,
+        id,
+        name,
+        payload,
+        sender,
+        ctk,
+    )
+    .await
+}
+
+/// Like [`send_over_l2cap`] for a GATT link (weave over ToPeripheral/FromPeripheral).
+pub async fn send_over_gatt(
+    link: GattLink,
+    endpoint_id: [u8; 4],
+    id: String,
+    name: String,
+    payload: OutboundPayload,
+    sender: Sender<ChannelMessage>,
+    ctk: CancellationToken,
+) -> Result<BridgeExit, anyhow::Error> {
+    send_over_link(
+        BLE_MEDIUM,
+        |end| GattCentralBridge::new(link, end).run(),
+        endpoint_id,
+        id,
+        name,
+        payload,
+        sender,
+        ctk,
+    )
+    .await
+}
+
+/// Runs a send session on the stream that `make_bridge` connects to the phone. `medium` is
+/// the only one offered in the connection request when no Wi-Fi upgrade will follow.
+#[allow(clippy::too_many_arguments)]
+async fn send_over_link<F, Fut>(
+    medium: i32,
+    make_bridge: F,
+    endpoint_id: [u8; 4],
+    id: String,
+    name: String,
+    payload: OutboundPayload,
+    sender: Sender<ChannelMessage>,
+    ctk: CancellationToken,
+) -> Result<BridgeExit, anyhow::Error>
+where
+    F: FnOnce(DuplexStream) -> Fut,
+    Fut: Future<Output = BridgeExit> + Send + 'static,
+{
     let (session_end, bridge_end) = tokio::io::duplex(STREAM_BUFFER);
-    let bridge = tokio::spawn(CentralBridge::new(link, bridge_end).run());
+    let bridge = tokio::spawn(make_bridge(bridge_end));
 
     let mut or = OutboundRequest::new_over(
         endpoint_id,
@@ -75,7 +140,7 @@ where
     );
     if crate::wifi_link().is_none() {
         // No upgrade will follow, so offer none: only the medium we are on.
-        or.set_mediums(vec![BLE_L2CAP_MEDIUM]);
+        or.set_mediums(vec![medium]);
     }
     let result = drive(&mut or, &id, &sender, &ctk).await;
     // The session's end of the stream closes, which tells the bridge to finish.

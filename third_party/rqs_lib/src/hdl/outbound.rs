@@ -7,13 +7,13 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use bytes::Bytes;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use libaes::{AES_256_KEY_LEN, Cipher};
 use p256::ecdh::diffie_hellman;
-use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
-use p256::{EncodedPoint, PublicKey};
+use p256::elliptic_curve::sec1::{FromSec1Point, ToSec1Point};
+use p256::{PublicKey, Sec1Point};
 use prost::Message;
-use rand::Rng;
+use rand::RngExt;
 use sha2::{Digest, Sha256, Sha512};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -362,7 +362,7 @@ impl OutboundRequest {
     pub async fn send_ukey2_client_init(&mut self) -> Result<(), anyhow::Error> {
         let (secret_key, public_key) = gen_ecdsa_keypair();
 
-        let encoded_point = public_key.to_encoded_point(false);
+        let encoded_point = public_key.to_sec1_point(false);
         let x = encoded_point.x().unwrap();
         let y = encoded_point.y().unwrap();
 
@@ -1469,8 +1469,8 @@ impl OutboundRequest {
         bytes.extend(decode_point(&peer_p256_key.x));
         bytes.extend(decode_point(&peer_p256_key.y));
 
-        let encoded_point = EncodedPoint::from_bytes(bytes)?;
-        let peer_key = Option::<PublicKey>::from(PublicKey::from_encoded_point(&encoded_point))
+        let encoded_point = Sec1Point::from_bytes(bytes)?;
+        let peer_key = Option::<PublicKey>::from(PublicKey::from_sec1_point(&encoded_point))
             .ok_or_else(|| anyhow!("The peer's public key is not on the curve"))?;
         let priv_key = self.state.private_key.as_ref().unwrap();
 
