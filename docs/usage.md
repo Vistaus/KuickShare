@@ -171,7 +171,7 @@ Sending to the phone produces the same notifications in the other direction. If 
 
 ## Without a shared network (experimental)
 
-With **Settings → Wi-Fi hotspot → Receive without a shared network** on, a phone whose Wi-Fi is off or on another network can send to this computer, and this computer can send to it. The transfer starts over Bluetooth and moves to a temporary Wi-Fi link. It is off by default.
+With **Settings → Wi-Fi Direct → Receive and send without a shared network** on, a phone whose Wi-Fi is off or on another network can send to this computer, and this computer can send to it. The transfer starts over Bluetooth and moves to a temporary Wi-Fi link. It is off by default.
 
 | | Receiving | Sending |
 |---|---|---|
@@ -255,7 +255,7 @@ Open it with `Ctrl+,`, from the menu, or from the tray. Changes apply at once an
 | Startup | Start at login | Off | Writes the autostart entry; the app starts hidden. The entry points at the running binary, so switch it off and on again after moving the installation |
 | Integration | Show tray icon | On | Without it, closing the window quits the app and nothing can be received until you open it again. At login it still starts hidden, so start KuickShare again to see the window |
 | Integration | Dolphin context menu | On | Adds or removes **Send with KuickShare** |
-| Wi-Fi hotspot | Receive without a shared network | Off | Experimental; see [Without a shared network](#without-a-shared-network-experimental) |
+| Wi-Fi Direct | Receive and send without a shared network | Off | Experimental; see [Without a shared network](#without-a-shared-network-experimental) |
 | Reset | Reset preferences... | | Restores every setting to its default, including autostart off and the Dolphin entry on. History, paired and trusted devices are kept |
 
 ## Do Not Disturb

@@ -148,6 +148,45 @@ pub async fn read_length_prefix<R: AsyncRead + Unpin>(
     Ok(*buf)
 }
 
+/// Cancel-safe read of a whole `[length][frame]`: the progress (`len_filled`, `body`,
+/// `body_filled`) lives in the caller, so dropping the future at any point loses nothing and
+/// the next call resumes the same frame. The state is reset once the frame is complete.
+pub async fn read_frame<R: AsyncRead + Unpin>(
+    socket: &mut R,
+    len_buf: &mut [u8; 4],
+    len_filled: &mut usize,
+    body: &mut Vec<u8>,
+    body_filled: &mut usize,
+    max_len: usize,
+) -> std::io::Result<Vec<u8>> {
+    while *len_filled < len_buf.len() {
+        let n = socket.read(&mut len_buf[*len_filled..]).await?;
+        if n == 0 {
+            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        }
+        *len_filled += n;
+    }
+    let len = u32::from_be_bytes(*len_buf) as usize;
+    if len > max_len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "message length too big",
+        ));
+    }
+    // A no-op when resuming: the buffer already has its final size.
+    body.resize(len, 0);
+    while *body_filled < len {
+        let n = socket.read(&mut body[*body_filled..]).await?;
+        if n == 0 {
+            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        }
+        *body_filled += n;
+    }
+    *len_filled = 0;
+    *body_filled = 0;
+    Ok(std::mem::take(body))
+}
+
 pub fn gen_ecdsa_keypair() -> (SecretKey, PublicKey) {
     let secret_key = SecretKey::generate_from_rng(&mut UnwrapErr(SysRng));
     let public_key = secret_key.public_key();
@@ -262,6 +301,50 @@ pub fn create_text_preview(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A frame split across reads, with the read future dropped in between (as a `select!`
+    /// does), resumes at the same byte: nothing is lost or read twice.
+    #[tokio::test]
+    async fn read_frame_resumes_a_split_frame() {
+        use std::time::Duration;
+        use tokio::io::AsyncWriteExt;
+
+        type State = ([u8; 4], usize, Vec<u8>, usize);
+        async fn read(
+            socket: &mut tokio::io::DuplexStream,
+            st: &mut State,
+        ) -> Option<std::io::Result<Vec<u8>>> {
+            let (len_buf, len_filled, body, body_filled) = st;
+            tokio::time::timeout(
+                Duration::from_millis(50),
+                read_frame(socket, len_buf, len_filled, body, body_filled, 16),
+            )
+            .await
+            .ok()
+        }
+
+        let (mut peer, mut ours) = tokio::io::duplex(64);
+        let mut st: State = ([0; 4], 0, Vec::new(), 0);
+
+        // Half of the prefix, then the rest of it and half of the body, then the end of the
+        // body and the first byte of the next frame.
+        peer.write_all(&[0, 0]).await.unwrap();
+        assert!(read(&mut ours, &mut st).await.is_none());
+        peer.write_all(&[0, 4, 1, 2]).await.unwrap();
+        assert!(read(&mut ours, &mut st).await.is_none());
+        peer.write_all(&[3, 4, 0]).await.unwrap();
+        assert_eq!(
+            read(&mut ours, &mut st).await.unwrap().unwrap(),
+            vec![1, 2, 3, 4]
+        );
+        peer.write_all(&[0, 0, 1, 7]).await.unwrap();
+        assert_eq!(read(&mut ours, &mut st).await.unwrap().unwrap(), vec![7]);
+
+        // Oversized frames are refused.
+        peer.write_all(&[0, 0, 0, 17]).await.unwrap();
+        let err = read(&mut ours, &mut st).await.unwrap().unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
 
     #[test]
     fn decode_point_restores_32_bytes() {

@@ -132,15 +132,15 @@ FormCard.FormCardPage {
     }
 
     SectionTitle {
-        text: i18n("Wi-Fi hotspot (experimental)")
+        text: i18n("Wi-Fi Direct")
     }
     FormCard.FormCard {
         maximumWidth: width - 1
         FormCard.FormSwitchDelegate {
             id: wifiSwitch
             icon.name: "network-wireless"
-            text: i18n("Receive without a shared network")
-            description: i18n("Be found over Bluetooth and move the transfer to a temporary Wi-Fi hotspot")
+            text: i18n("Receive and send without a shared network")
+            description: i18n("Be found over Bluetooth and move the transfer to a temporary Wi-Fi link")
             checked: page.core.wifiUpgrade
             enabled: page.core.connected
             onToggled: {
@@ -152,9 +152,13 @@ FormCard.FormCardPage {
             }
         }
     }
-    FormCard.FormSectionText {
-        Layout.bottomMargin: 0
+    // Experimental and with side effects, so a warning box like the one under Trusted devices.
+    Kirigami.InlineMessage {
+        visible: true // hidden by default
+        type: Kirigami.MessageType.Warning
         text: i18n("Experimental. Needs NetworkManager, its dnsmasq package and Bluetooth. While on, this computer is visible over Bluetooth to devices in range, and its Wi-Fi connection may drop while the hotspot is active. See the documentation.")
+        Layout.fillWidth: true
+        Layout.topMargin: Kirigami.Units.largeSpacing
     }
 
     SectionTitle {

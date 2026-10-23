@@ -6,6 +6,7 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
 use crate::DeviceType;
+use crate::hdl::new_daemon;
 use crate::utils::{is_not_self_ip, parse_mdns_endpoint_info};
 
 #[derive(Debug, Clone, Default)]
@@ -61,7 +62,7 @@ pub struct MDnsDiscovery {
 
 impl MDnsDiscovery {
     pub fn new(sender: broadcast::Sender<EndpointInfo>) -> Result<Self, anyhow::Error> {
-        let daemon = ServiceDaemon::new()?;
+        let daemon = new_daemon()?;
 
         Ok(Self { daemon, sender })
     }

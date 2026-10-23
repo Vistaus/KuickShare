@@ -13,10 +13,11 @@ use p256::{PublicKey, Sec1Point};
 use prost::Message;
 use rand::RngExt;
 use sha2::{Digest, Sha256, Sha512};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{Receiver, Sender};
 
+use super::outbound::{CANCEL_TIMEOUT, sharing_cancel_frame};
 use super::{InnerState, TransferState};
 use crate::channel::{self, ChannelMessage, MessageClient, TransferAction, TransferKind};
 use crate::hdl::info::{InternalFileInfo, TransferMetadata, TransferPayload, TransferPayloadKind};
@@ -141,7 +142,7 @@ impl InboundRequest {
                                         },
                                         true,
                                     ).await;
-                                    self.disconnection().await?;
+                                    self.cancel_peer().await;
                                     return Err(anyhow!(crate::errors::AppError::NotAnError));
                                 },
                             }
@@ -1115,6 +1116,32 @@ impl InboundRequest {
         Ok(())
     }
 
+    /// Tells the peer that the user cancelled and closes our side, as the outbound side does:
+    /// the sharing Cancel, the Disconnection, a FIN, then a wait for the peer to close, all
+    /// within `CANCEL_TIMEOUT`. Failures are only logged. Called between two frames: the
+    /// writes of `handle()` are not interrupted by the select that leads here.
+    async fn cancel_peer(&mut self) {
+        info!("Transfer canceled by the user");
+        let closing = async {
+            let sent: Result<(), anyhow::Error> = async {
+                self.send_encrypted_frame(&sharing_cancel_frame()).await?;
+                self.disconnection().await
+            }
+            .await;
+            if let Err(e) = sent {
+                debug!("Cancel frames not sent: {e}");
+            }
+            if let Err(e) = self.socket.shutdown().await {
+                debug!("Closing the write half failed: {e}");
+            }
+            let mut sink = [0u8; 4096];
+            while matches!(self.socket.read(&mut sink).await, Ok(n) if n > 0) {}
+        };
+        if tokio::time::timeout(CANCEL_TIMEOUT, closing).await.is_err() {
+            debug!("The peer did not close after the cancel in time");
+        }
+    }
+
     async fn disconnection(&mut self) -> Result<(), anyhow::Error> {
         let frame = location_nearby_connections::OfflineFrame {
             version: Some(location_nearby_connections::offline_frame::Version::V1.into()),
@@ -1639,7 +1666,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use tokio::sync::broadcast;
 

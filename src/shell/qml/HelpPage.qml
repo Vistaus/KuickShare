@@ -61,6 +61,28 @@ FormCard.FormCardPage {
     }
 
     SectionTitle {
+        text: i18n("Wi-Fi Direct (experimental)")
+    }
+    FormCard.FormCard {
+        maximumWidth: width - 1
+        Entry {
+            icon.name: "network-wireless"
+            text: i18n("Without a shared network")
+            description: i18n("The transfer starts over Bluetooth and moves to a temporary Wi-Fi link: this computer hosts a hotspot to receive, and joins the phone's Wi-Fi Direct group to send. Turn it on in Preferences; it needs NetworkManager, its dnsmasq package and Bluetooth.")
+        }
+        Entry {
+            icon.name: "smartphone-symbolic"
+            text: i18n("On the phone")
+            description: i18n("Keep Quick Share's Receive screen open and set to Everyone. A phone on the same network as this computer is reached over the network instead.")
+        }
+        Entry {
+            icon.name: "network-wireless"
+            text: i18n("Wi-Fi connection and firewall")
+            description: i18n("With one Wi-Fi card, the normal connection of this computer may drop while the temporary link is active. Without firewalld, the phone that joins the hotspot can reach every service on this computer.")
+        }
+    }
+
+    SectionTitle {
         text: i18n("Troubleshooting")
     }
     FormCard.FormCard {
@@ -74,6 +96,11 @@ FormCard.FormCardPage {
             icon.name: "help-hint"
             text: i18n("This computer does not see the phone")
             description: i18n("Set the phone to Everyone and keep its Quick Share screen open.")
+        }
+        Entry {
+            icon.name: "help-hint"
+            text: i18n("The phone is not found over Bluetooth")
+            description: i18n("Open Quick Share's Receive screen on the phone, set it to Everyone and use “Search again” on the Send page.")
         }
         Entry {
             icon.name: "help-hint"

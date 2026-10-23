@@ -95,6 +95,31 @@ pub fn scan_result(
     })
 }
 
+/// A Pixel sends its full advertisement, with the PSM, only about every 10 s (observed). A
+/// phone first heard less than this ago may simply not have sent it yet.
+const FULL_ADVERT_INTERVAL: Duration = Duration::from_secs(10);
+
+/// How long a "this phone has no PSM" verdict is trusted by a send.
+const NO_PSM_TTL: Duration = Duration::from_secs(300);
+
+/// What the windows so far showed of one phone.
+#[derive(Debug)]
+struct Seen {
+    first: Instant,
+    last: Instant,
+    /// A PSM showed up at least once.
+    psm: bool,
+}
+
+impl Seen {
+    /// Long enough on the air for a full advertisement to have come, and never with a PSM.
+    fn no_psm(&self, now: Instant) -> bool {
+        !self.psm
+            && now.saturating_duration_since(self.first) >= FULL_ADVERT_INTERVAL
+            && now.saturating_duration_since(self.last) < NO_PSM_TTL
+    }
+}
+
 /// Keeps one entry per endpoint id (the newest sighting, hence the newest address wins) and
 /// tracks which phones disappeared from one window to the next.
 #[derive(Debug, Default)]
@@ -102,17 +127,75 @@ pub struct Dedup {
     /// Reported by the previous windows.
     known: HashMap<[u8; 4], ScanResult>,
     current: HashMap<[u8; 4], ScanResult>,
+    /// Sightings of the phones in `known` and `current`, kept across windows (a cancelled
+    /// window leaves them alone). A phone absent from a completed window is dropped.
+    seen: HashMap<[u8; 4], Seen>,
+    /// Phones judged to advertise no PSM at the end of a window, with the time of the verdict.
+    /// A Samsung advertisement ends after the token (no mask byte) while a Pixel sends its PSM
+    /// only every [`FULL_ADVERT_INTERVAL`], so a sighting without PSM proves nothing: see
+    /// [`Self::no_psm_at`]. A sighting with a PSM withdraws the verdict.
+    no_psm: HashMap<[u8; 4], Instant>,
 }
 
 impl Dedup {
-    /// Forgets what a cancelled window had seen.
+    /// Forgets what a cancelled window had reported; the sightings and verdicts stay.
     pub fn begin_window(&mut self) {
         self.current.clear();
     }
 
+    /// True when the phone advertises no PSM: a window ended with a verdict in the last
+    /// [`NO_PSM_TTL`], or, without waiting for the end of a window, it was first heard at least
+    /// [`FULL_ADVERT_INTERVAL`] ago in the last window or the one under way and never with a
+    /// PSM. A PSM always wins.
+    pub fn advertises_no_psm(&self, id: &[u8; 4]) -> bool {
+        self.no_psm_at(id, Instant::now())
+    }
+
+    fn no_psm_at(&self, id: &[u8; 4], now: Instant) -> bool {
+        let seen = self.seen.get(id);
+        if seen.is_some_and(|s| s.psm) {
+            return false;
+        }
+        self.no_psm
+            .get(id)
+            .is_some_and(|at| now.saturating_duration_since(*at) < NO_PSM_TTL)
+            || (seen.is_some_and(|s| s.no_psm(now))
+                && (self.current.contains_key(id) || self.known.contains_key(id)))
+    }
+
+    /// Withdraws the verdict, e.g. after a send scan saw a PSM.
+    pub fn forget_no_psm(&mut self, id: &[u8; 4]) {
+        self.no_psm.remove(id);
+        if let Some(seen) = self.seen.get_mut(id) {
+            seen.psm = true;
+        }
+    }
+
     /// Returns the result when the caller has to be told about it.
     pub fn observe(&mut self, result: ScanResult) -> Option<ScanResult> {
+        self.observe_at(result, Instant::now())
+    }
+
+    fn observe_at(&mut self, result: ScanResult, now: Instant) -> Option<ScanResult> {
         let id = result.endpoint_id;
+        let seen = self.seen.entry(id).or_insert(Seen {
+            first: now,
+            last: now,
+            psm: false,
+        });
+        if now.saturating_duration_since(seen.last) >= NO_PSM_TTL {
+            // Gone for so long that the old sightings say nothing about it any more.
+            *seen = Seen {
+                first: now,
+                last: now,
+                psm: false,
+            };
+        }
+        seen.last = now;
+        if result.psm.is_some() {
+            seen.psm = true;
+            self.no_psm.remove(&id);
+        }
         let changed = self
             .current
             .get(&id)
@@ -124,6 +207,10 @@ impl Dedup {
 
     /// Ids seen in the previous windows but not in this one; the window becomes the baseline.
     pub fn end_window(&mut self) -> Vec<[u8; 4]> {
+        self.end_window_at(Instant::now())
+    }
+
+    fn end_window_at(&mut self, now: Instant) -> Vec<[u8; 4]> {
         let mut gone: Vec<_> = self
             .known
             .keys()
@@ -131,7 +218,15 @@ impl Dedup {
             .copied()
             .collect();
         gone.sort_unstable();
+        for (id, seen) in &self.seen {
+            if self.current.contains_key(id) && seen.no_psm(now) {
+                self.no_psm.insert(*id, now);
+            }
+        }
+        self.no_psm
+            .retain(|_, at| now.saturating_duration_since(*at) < NO_PSM_TTL);
         self.known = std::mem::take(&mut self.current);
+        self.seen.retain(|id, _| self.known.contains_key(id));
         gone
     }
 }
@@ -155,8 +250,10 @@ pub async fn scan_window(
         })
         .await
         .context("set the discovery filter")?;
-    collect(adapter, duration, dedup, &mut sink).await?;
+    let collected = collect(adapter, duration, dedup, &mut sink).await;
+    // Also after a failure: the next window must not start under a late stop of this one.
     wait_discovery_stopped(adapter).await;
+    collected?;
     for id in dedup.end_window() {
         sink(ScanEvent::Gone(id));
     }
@@ -167,7 +264,7 @@ pub async fn scan_window(
 /// before that is cancelled by the late stop and then sees nothing, which left a rescan that
 /// followed a scan at once deaf (a send started right after the list was filled never found its
 /// phone). Waits, for a short while at most, until BlueZ reports the discovery as stopped.
-async fn wait_discovery_stopped(adapter: &Adapter) {
+pub(crate) async fn wait_discovery_stopped(adapter: &Adapter) {
     for _ in 0..40 {
         if !adapter.is_discovering().await.unwrap_or(false) {
             return;
@@ -257,10 +354,15 @@ pub fn endpoint_info(event: &ScanEvent) -> EndpointInfo {
     }
 }
 
-/// The sighting a send waits for: its phone, with a PSM to dial.
-fn target_found(event: ScanEvent, target: BleTarget) -> Option<ScanResult> {
+/// The sighting a send waits for: its phone, with a PSM to dial, or without one when the phone
+/// is known to advertise none (`no_psm_known`, see [`Dedup::advertises_no_psm`]).
+fn target_found(event: ScanEvent, target: BleTarget, no_psm_known: bool) -> Option<ScanResult> {
     match event {
-        ScanEvent::Found(r) if r.endpoint_id == target.endpoint_id && r.psm.is_some() => Some(r),
+        ScanEvent::Found(r)
+            if r.endpoint_id == target.endpoint_id && (r.psm.is_some() || no_psm_known) =>
+        {
+            Some(r)
+        }
         _ => None,
     }
 }
@@ -280,6 +382,8 @@ pub enum ScanOutcome {
     TooSoon,
     NoAdapter,
     Failed,
+    /// A send took the adapter before the window was over.
+    Interrupted,
 }
 
 #[derive(Debug, Default)]
@@ -292,6 +396,8 @@ struct ScanState {
 #[derive(Debug, Default)]
 pub struct BleScanner {
     state: tokio::sync::Mutex<ScanState>,
+    /// Cancels the list window under way; a send does it to get the slot at once.
+    window: Mutex<CancellationToken>,
 }
 
 pub static SCANNER: Lazy<BleScanner> = Lazy::new(BleScanner::default);
@@ -312,11 +418,13 @@ async fn open_adapter() -> anyhow::Result<(bluer::Session, Adapter)> {
 }
 
 /// Scans until `target` shows up with a PSM, which ends the scan at once. A sighting without a
-/// PSM is kept and returned at the end of the window: the phone is then reached over GATT.
-/// The scan is over when this returns.
+/// PSM is kept and returned at the end of the window (the phone is then reached over GATT),
+/// unless `no_psm_known`: the phone is known to have none, so the first sighting ends the scan.
+/// The scan is over, and BlueZ's discovery stopped, when this returns.
 async fn find_target(
     adapter: &Adapter,
     target: BleTarget,
+    no_psm_known: bool,
     window: Duration,
     ctk: &CancellationToken,
 ) -> anyhow::Result<ScanResult> {
@@ -342,27 +450,34 @@ async fn find_target(
                 target.id()
             );
         }
-        if let Some(r) = target_found(event, target) {
+        if let Some(r) = target_found(event, target, no_psm_known) {
             let _ = tx.send(r);
         }
     });
-    tokio::pin!(scan);
-    tokio::select! {
-        Some(found) = rx.recv() => Ok(found),
-        r = &mut scan => {
-            r?;
-            rx.try_recv()
-                .ok()
-                .or_else(|| without_psm.lock().ok().and_then(|kept| kept.clone()))
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "{} not seen within {window:?}: is Quick Share open on it, visible to Everyone?",
-                        target.id()
-                    )
-                })
+    let outcome = {
+        tokio::pin!(scan);
+        tokio::select! {
+            Some(found) = rx.recv() => Ok(found),
+            r = &mut scan => match r {
+                Err(e) => Err(e),
+                Ok(()) => rx
+                    .try_recv()
+                    .ok()
+                    .or_else(|| without_psm.lock().ok().and_then(|kept| kept.clone()))
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "{} not seen within {window:?}: is Quick Share open on it, visible to Everyone?",
+                            target.id()
+                        )
+                    }),
+            },
+            () = ctk.cancelled() => Err(anyhow::anyhow!("cancelled while looking for {}", target.id())),
         }
-        () = ctk.cancelled() => bail!("cancelled while looking for {}", target.id()),
-    }
+        // The scan future is dropped here, which is what stops the discovery.
+    };
+    // Dialing while BlueZ still stops the discovery made the dial fail ("operation in progress").
+    wait_discovery_stopped(adapter).await;
+    outcome
 }
 
 impl BleScanner {
@@ -397,10 +512,22 @@ impl BleScanner {
                 return ScanOutcome::NoAdapter;
             }
         };
-        let result = scan_window(&adapter, SCAN_WINDOW, &mut state.dedup, |event| {
-            let _ = sender.send(endpoint_info(&event));
-        })
-        .await;
+        let interrupt = CancellationToken::new();
+        if let Ok(mut window) = self.window.lock() {
+            *window = interrupt.clone();
+        }
+        let result = tokio::select! {
+            r = scan_window(&adapter, SCAN_WINDOW, &mut state.dedup, |event| {
+                let _ = sender.send(endpoint_info(&event));
+            }) => r,
+            // The window is dropped here, which stops the discovery; the sightings it made stay
+            // in the dedup for the send.
+            () = interrupt.cancelled() => {
+                wait_discovery_stopped(&adapter).await;
+                debug!("BLE scan interrupted by a send");
+                return ScanOutcome::Interrupted;
+            }
+        };
         match result {
             Ok(()) => ScanOutcome::Done,
             Err(e) => {
@@ -424,18 +551,28 @@ impl BleScanner {
         sender: broadcast::Sender<ChannelMessage>,
         ctk: CancellationToken,
     ) -> anyhow::Result<()> {
-        let _slot = tokio::select! {
+        // A list window under way would keep the slot for up to SCAN_WINDOW.
+        if let Ok(window) = self.window.lock() {
+            window.cancel();
+        }
+        let mut slot = tokio::select! {
             slot = self.state.lock() => slot,
             () = ctk.cancelled() => bail!("cancelled before the Bluetooth adapter was free"),
         };
         let (_session, adapter) = open_adapter().await?;
-        let scan = find_target(&adapter, target, RESCAN_WINDOW, &ctk).await?;
+        let no_psm_known = slot.dedup.advertises_no_psm(&target.endpoint_id);
+        let scan = find_target(&adapter, target, no_psm_known, RESCAN_WINDOW, &ctk).await?;
         if scan.psm.is_some() {
+            slot.dedup.forget_no_psm(&target.endpoint_id);
             let stream = dial_l2cap(&adapter, &scan).await?;
             send_over_l2cap(stream, local_endpoint_id, id, name, payload, sender, ctk).await?;
         } else {
             debug!("{} advertises no PSM: sending over GATT", target.id());
-            let link = dial_gatt(&adapter, &scan).await?;
+            // Dropping the dial on cancellation also drops its pending BlueZ connect.
+            let link = tokio::select! {
+                link = dial_gatt(&adapter, &scan) => link?,
+                () = ctk.cancelled() => bail!("cancelled while connecting to {}", target.id()),
+            };
             send_over_gatt(link, local_endpoint_id, id, name, payload, sender, ctk).await?;
         }
         Ok(())
@@ -724,6 +861,116 @@ mod tests {
         assert_eq!(raw.id, "ble:00010203");
     }
 
+    fn without(id: &[u8; 4]) -> ScanResult {
+        ScanResult {
+            psm: None,
+            ..result(id, 2, -60)
+        }
+    }
+
+    #[test]
+    fn no_psm_needs_an_early_sighting_and_goes_stale() {
+        let t0 = Instant::now();
+        let secs = Duration::from_secs;
+        let with = result(b"PIXL", 1, -60);
+        let mut d = Dedup::default();
+        d.begin_window();
+        d.observe_at(with.clone(), t0 + secs(1));
+        d.observe_at(
+            ScanResult {
+                psm: None,
+                address: addr(9),
+                ..with.clone()
+            },
+            t0 + secs(2),
+        );
+        d.observe_at(without(b"SAMS"), t0 + secs(3));
+        // First heard in the last seconds: its full advertisement may not have come yet.
+        d.observe_at(without(b"LATE"), t0 + secs(14));
+        d.end_window_at(t0 + secs(15));
+        let end = t0 + secs(15);
+        assert!(!d.no_psm_at(b"PIXL", end));
+        assert!(d.no_psm_at(b"SAMS", end));
+        assert!(!d.no_psm_at(b"LATE", end));
+        assert!(!d.no_psm_at(b"NONE", end));
+        assert!(d.no_psm_at(b"SAMS", end + NO_PSM_TTL - secs(1)));
+        assert!(!d.no_psm_at(b"SAMS", end + NO_PSM_TTL));
+        // A later sighting with a PSM withdraws the verdict.
+        d.observe_at(
+            ScanResult {
+                psm: Some(133),
+                ..without(b"SAMS")
+            },
+            end + secs(20),
+        );
+        assert!(!d.no_psm_at(b"SAMS", end + secs(20)));
+    }
+
+    #[test]
+    fn no_psm_holds_while_the_window_is_still_running() {
+        let t0 = Instant::now();
+        let secs = Duration::from_secs;
+        let mut d = Dedup::default();
+        d.begin_window();
+        d.observe_at(without(b"SAMS"), t0 + secs(2));
+        d.observe_at(
+            ScanResult {
+                psm: Some(133),
+                ..without(b"PIXL")
+            },
+            t0 + secs(2),
+        );
+        assert!(!d.no_psm_at(b"SAMS", t0 + secs(11)));
+        assert!(d.no_psm_at(b"SAMS", t0 + secs(12)));
+        assert!(!d.no_psm_at(b"PIXL", t0 + secs(12)));
+        // A PSM that shows up after the 10 s mark wins at once.
+        d.observe_at(
+            ScanResult {
+                psm: Some(133),
+                ..without(b"SAMS")
+            },
+            t0 + secs(13),
+        );
+        assert!(!d.no_psm_at(b"SAMS", t0 + secs(13)));
+    }
+
+    #[test]
+    fn sightings_and_verdicts_survive_the_next_window() {
+        let t0 = Instant::now();
+        let secs = Duration::from_secs;
+        let mut d = Dedup::default();
+        d.begin_window();
+        d.observe_at(without(b"SAMS"), t0 + secs(1));
+        d.end_window_at(t0 + secs(15));
+        // A new window, phone not heard yet: the verdict and the sighting still count.
+        d.begin_window();
+        assert!(d.no_psm_at(b"SAMS", t0 + secs(16)));
+        // Heard again: the first sighting is still the old one.
+        d.observe_at(without(b"SAMS"), t0 + secs(17));
+        assert!(d.no_psm_at(b"SAMS", t0 + secs(17)));
+        // A cancelled window (no end_window) keeps them too.
+        d.begin_window();
+        assert!(d.no_psm_at(b"SAMS", t0 + secs(18)));
+        // Missing from a completed window drops the sighting, not the verdict until its TTL.
+        d.end_window_at(t0 + secs(30));
+        assert!(d.seen.is_empty());
+        assert!(d.no_psm_at(b"SAMS", t0 + secs(31)));
+        assert!(!d.no_psm_at(b"SAMS", t0 + secs(30) + NO_PSM_TTL));
+    }
+
+    #[test]
+    fn forget_no_psm_sticks_until_the_phone_is_gone() {
+        let t0 = Instant::now();
+        let secs = Duration::from_secs;
+        let mut d = Dedup::default();
+        d.begin_window();
+        d.observe_at(without(b"SAMS"), t0);
+        d.end_window_at(t0 + secs(15));
+        assert!(d.no_psm_at(b"SAMS", t0 + secs(15)));
+        d.forget_no_psm(b"SAMS");
+        assert!(!d.no_psm_at(b"SAMS", t0 + secs(16)));
+    }
+
     #[test]
     fn a_send_waits_only_for_its_phone_with_a_psm() {
         let t = BleTarget {
@@ -731,16 +978,20 @@ mod tests {
         };
         let hit = result(b"ABCD", 1, -60);
         assert_eq!(
-            target_found(ScanEvent::Found(hit.clone()), t),
+            target_found(ScanEvent::Found(hit.clone()), t, false),
             Some(hit.clone())
         );
         assert_eq!(
-            target_found(ScanEvent::Found(result(b"WXYZ", 1, -60)), t),
+            target_found(ScanEvent::Found(result(b"WXYZ", 1, -60)), t, false),
             None
         );
-        assert_eq!(target_found(ScanEvent::Gone(*b"ABCD"), t), None);
+        assert_eq!(target_found(ScanEvent::Gone(*b"ABCD"), t, true), None);
         let no_psm = ScanResult { psm: None, ..hit };
-        assert_eq!(target_found(ScanEvent::Found(no_psm), t), None);
+        assert_eq!(target_found(ScanEvent::Found(no_psm.clone()), t, false), None);
+        assert_eq!(
+            target_found(ScanEvent::Found(no_psm.clone()), t, true),
+            Some(no_psm)
+        );
     }
 
     #[test]

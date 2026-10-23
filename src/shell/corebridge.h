@@ -195,6 +195,8 @@ private Q_SLOTS:
 private:
     /// Ends a pending send row that the core never took over.
     void failIfStarting(const QString &deviceId, quint64 sendNo);
+    /// Adds the pending row for a send and calls `method`; `hasJob` is true when the shell tracks a Plasma job for it.
+    void startSend(const QString &deviceId, QVariantMap row, const QString &method, const QVariantList &args, bool hasJob);
     void call(const QString &method, const QVariantList &args);
     void callAsync(const QDBusMessage &message, const std::function<void()> &onSuccess = {}, const std::function<void()> &onError = {});
     void setRemoteProperty(const QString &name, const QVariant &value);

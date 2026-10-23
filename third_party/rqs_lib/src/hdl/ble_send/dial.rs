@@ -31,7 +31,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
 /// How long a connected socket gets to report a send MTU.
 const READY_TIMEOUT: Duration = Duration::from_secs(3);
 const READY_POLL: Duration = Duration::from_millis(20);
-const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const RECV_MTU: u16 = 4096;
 const ENOTCONN: i32 = 107;
 
@@ -71,8 +71,13 @@ pub enum Next {
 
 /// `failed` attempts have failed `elapsed` after the dial started.
 pub fn next_step(failed: u32, elapsed: Duration) -> Next {
+    next_step_within(failed, elapsed, DIAL_TIMEOUT)
+}
+
+/// [`next_step`] for a dial that has `budget` in all.
+pub fn next_step_within(failed: u32, elapsed: Duration, budget: Duration) -> Next {
     let backoff = Duration::from_millis(500 * u64::from(failed)).min(Duration::from_secs(2));
-    if failed >= MAX_ATTEMPTS || elapsed + backoff + SETTLE >= DIAL_TIMEOUT {
+    if failed >= MAX_ATTEMPTS || elapsed + backoff + SETTLE >= budget {
         Next::GiveUp
     } else {
         Next::Retry(backoff)
@@ -138,7 +143,9 @@ pub(super) async fn drop_stale_link(adapter: &Adapter, scan: &ScanResult) -> Res
     match timeout(DISCONNECT_TIMEOUT, device.disconnect()).await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => debug!("{INNER_NAME}: disconnect failed: {e}"),
-        Err(_) => debug!("{INNER_NAME}: disconnect timed out"),
+        Err(_) => debug!(
+            "{INNER_NAME}: no answer to the disconnect within {DISCONNECT_TIMEOUT:?}; BlueZ closes the link later"
+        ),
     }
     Ok(())
 }

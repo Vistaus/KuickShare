@@ -643,7 +643,7 @@ pub async fn watch_network(core: Arc<tokio::sync::Mutex<Core>>) {
     }
 }
 
-/// A Bluetooth send scans for at most 12 s, then dials (a GATT dial takes up to 15 s) and waits
+/// A Bluetooth send scans for at most 12 s, then dials (a GATT dial takes up to 22 s) and waits
 /// for the phone's first frame. The library reports a failure itself; this only covers a hang.
 const BLE_START_TIMEOUT: Duration = Duration::from_secs(40);
 

@@ -8,21 +8,31 @@
 use std::time::Duration;
 
 use bluer::gatt::remote::Characteristic;
-use bluer::{Adapter, Device, Uuid, UuidExt};
+use bluer::{
+    Adapter, AdapterEvent, Address, Device, DiscoveryFilter, DiscoveryTransport, ErrorKind, Uuid,
+    UuidExt,
+};
 use futures::{Stream, StreamExt, pin_mut};
 use tokio::sync::mpsc;
 use tokio::time::{Instant, sleep, timeout};
 
-use super::dial::{DIAL_TIMEOUT, Next, SETTLE, drop_stale_link, next_step};
+use super::dial::{Next, SETTLE, drop_stale_link, next_step_within};
 use super::gatt_bridge::GattLink;
 use crate::hdl::ble_receiver::gatt::{FROM_PERIPHERAL_UUID, TO_PERIPHERAL_UUID};
 use crate::hdl::ble_receiver::service_data::SERVICE_UUID;
-use crate::hdl::ble_scan::ScanResult;
+use crate::hdl::ble_scan::{ScanResult, wait_discovery_stopped};
 
 const INNER_NAME: &str = "GattDial";
-/// One `connect` call.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
-const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+/// Whole dial, settle and service discovery included. A send scans for at most 12 s and the
+/// app gives up on a send that has not started after 40 s (`BLE_START_TIMEOUT`), so this
+/// leaves the rest for the first frame.
+const GATT_DIAL_TIMEOUT: Duration = Duration::from_secs(22);
+/// One `connect` call. The Galaxy A55 took 5.8 s once (0.8 s on other runs).
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long to wait for BlueZ to list a device it dropped, once the phone is heard again.
+const REDISCOVER_TIMEOUT: Duration = Duration::from_secs(5);
+/// BlueZ was seen finishing a disconnect 0.3-0.6 s after 2 s.
+const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long the last queued writes get to go out once the bridge is done.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
 /// Writes waiting for the pump; a full queue blocks the bridge.
@@ -51,13 +61,32 @@ fn pick_service(services: &[Vec<Uuid>]) -> Option<usize> {
 pub async fn dial_gatt(adapter: &Adapter, scan: &ScanResult) -> anyhow::Result<GattLink> {
     let started = Instant::now();
     let device = adapter.device(scan.address)?;
-    let result = timeout(DIAL_TIMEOUT, dial(adapter, scan, &device, started))
-        .await
-        .unwrap_or_else(|_| Err(anyhow::anyhow!("no GATT link within {DIAL_TIMEOUT:?}")));
-    if result.is_err() {
+    // If this future is dropped (send cancelled), the connect BlueZ may still hold goes away.
+    let mut guard = DisconnectOnDrop(Some(device.clone()));
+    let mut disconnected = false;
+    let result = timeout(
+        GATT_DIAL_TIMEOUT,
+        dial(adapter, scan, &device, started, &mut disconnected),
+    )
+    .await
+    .unwrap_or_else(|_| Err(anyhow::anyhow!("no GATT link within {GATT_DIAL_TIMEOUT:?}")));
+    if result.is_err() && !disconnected {
+        // Still armed while this runs: a cancellation here spawns the disconnect.
         disconnect(&device).await;
     }
+    guard.0 = None;
     result
+}
+
+/// Closes the link, or cancels the connect BlueZ still has pending, when dropped while armed.
+struct DisconnectOnDrop(Option<Device>);
+
+impl Drop for DisconnectOnDrop {
+    fn drop(&mut self) {
+        if let (Some(device), Ok(rt)) = (self.0.take(), tokio::runtime::Handle::try_current()) {
+            rt.spawn(async move { disconnect(&device).await });
+        }
+    }
 }
 
 async fn dial(
@@ -65,21 +94,41 @@ async fn dial(
     scan: &ScanResult,
     device: &Device,
     started: Instant,
+    disconnected: &mut bool,
 ) -> anyhow::Result<GattLink> {
     drop_stale_link(adapter, scan).await?;
     sleep(SETTLE).await;
 
     let mut failed = 0;
     loop {
+        *disconnected = false;
+        let mut gone = false;
         let last = match timeout(CONNECT_TIMEOUT, device.connect()).await {
             Ok(Ok(())) => break,
-            Ok(Err(e)) => format!("connect: {e}"),
-            Err(_) => "connect timed out".to_string(),
+            Ok(Err(e)) => {
+                gone = device_gone(&e);
+                format!("connect: {e}")
+            }
+            Err(_) => {
+                // The call was dropped, but BlueZ keeps its LE connect pending, and the next
+                // attempt (or scan) would fail with "operation in progress".
+                disconnect(device).await;
+                *disconnected = true;
+                "connect timed out".to_string()
+            }
         };
         failed += 1;
         debug!("{INNER_NAME}: attempt {failed} failed: {last}");
-        match next_step(failed, started.elapsed()) {
-            Next::Retry(wait) => sleep(wait).await,
+        match next_step_within(failed, started.elapsed(), GATT_DIAL_TIMEOUT) {
+            Next::Retry(wait) => {
+                if gone {
+                    // BlueZ dropped the object (a non-paired device does not outlive a
+                    // cancelled connect): the next connect needs it back, not a pause.
+                    rediscover(adapter, scan.address).await;
+                } else {
+                    sleep(wait).await;
+                }
+            }
             Next::GiveUp => anyhow::bail!("no GATT connection after {failed} attempts: {last}"),
         }
     }
@@ -189,12 +238,48 @@ async fn forward_writes(mut rx: mpsc::Receiver<Vec<u8>>, to_phone: Characteristi
     }
 }
 
+/// BlueZ no longer has the device object ("the target object was either not present or
+/// removed", or `DoesNotExist`).
+fn device_gone(e: &bluer::Error) -> bool {
+    matches!(e.kind, ErrorKind::NotFound | ErrorKind::DoesNotExist)
+}
+
+/// Brings the device object back: BlueZ has no per-address discovery filter, so this runs an
+/// LE discovery until `address` is listed again, [`REDISCOVER_TIMEOUT`] at most. Best effort:
+/// the next connect tells whether it worked.
+async fn rediscover(adapter: &Adapter, address: Address) {
+    debug!("{INNER_NAME}: device object gone, discovering {address} again");
+    let filter = DiscoveryFilter {
+        transport: DiscoveryTransport::Le,
+        ..Default::default()
+    };
+    if let Err(e) = adapter.set_discovery_filter(filter).await {
+        debug!("{INNER_NAME}: discovery filter failed: {e}");
+    }
+    let listed = async {
+        let events = adapter.discover_devices().await.ok()?;
+        pin_mut!(events);
+        while let Some(event) = events.next().await {
+            if matches!(event, AdapterEvent::DeviceAdded(a) if a == address) {
+                return Some(());
+            }
+        }
+        None
+    };
+    let found = timeout(REDISCOVER_TIMEOUT, listed).await.ok().flatten();
+    // The stream is dropped: let BlueZ stop the discovery before the next connect.
+    wait_discovery_stopped(adapter).await;
+    debug!("{INNER_NAME}: device {address} listed again: {}", found.is_some());
+}
+
 /// Best effort: a link that cannot be closed is BlueZ's to clean up.
 async fn disconnect(device: &Device) {
     match timeout(DISCONNECT_TIMEOUT, device.disconnect()).await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => debug!("{INNER_NAME}: disconnect failed: {e}"),
-        Err(_) => debug!("{INNER_NAME}: disconnect timed out"),
+        Err(_) => debug!(
+            "{INNER_NAME}: no answer to the disconnect within {DISCONNECT_TIMEOUT:?}; BlueZ closes the link later"
+        ),
     }
 }
 

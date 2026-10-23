@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::Read;
 use std::os::unix::fs::MetadataExt;
@@ -15,7 +15,7 @@ use p256::{PublicKey, Sec1Point};
 use prost::Message;
 use rand::RngExt;
 use sha2::{Digest, Sha256, Sha512};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::broadcast::error::TryRecvError;
 use tokio::sync::broadcast::{Receiver, Sender};
@@ -48,7 +48,7 @@ use crate::sharing_nearby::{
 use crate::upgrade::{self, Reply, UpgradeEvent, UpgradeState};
 use crate::utils::{
     DeviceType, RemoteDeviceInfo, create_text_preview, decode_point, encode_point,
-    gen_ecdsa_keypair, gen_random, hkdf_extract_expand, read_length_prefix, stream_read_exact,
+    gen_ecdsa_keypair, gen_random, hkdf_extract_expand, read_frame,
     to_four_digit_string,
 };
 use crate::{DEVICE_NAME, location_nearby_connections, sharing_nearby};
@@ -57,6 +57,8 @@ type HmacSha256 = Hmac<Sha256>;
 
 const SANE_FRAME_LENGTH: i32 = 5 * 1024 * 1024;
 const SANITY_DURATION: Duration = Duration::from_micros(10);
+/// Peer frames read while a chunk is written and kept for the next `handle()`; more are dropped.
+const MAX_PENDING_FRAMES: usize = 32;
 
 #[derive(Debug, Clone)]
 pub enum OutboundPayload {
@@ -72,14 +74,24 @@ pub enum OutboundPayload {
 pub struct OutboundRequest {
     endpoint_id: [u8; 4],
     socket: MigratableStream,
-    /// Partially received length prefix, kept across cancelled `handle` calls.
+    /// Partially received frame (length prefix, then body), kept across cancelled reads.
     length_buf: [u8; 4],
     length_filled: usize,
+    frame_buf: Vec<u8>,
+    frame_filled: usize,
     /// Keep-alives ignored while the handshake waits for the ConnectionResponse.
     keep_alives_ignored: u8,
     /// Frames are plain `[length][OfflineFrame]` (no SecureMessage): set once the upgrade
     /// to a channel with disabled encryption completes.
     plain_frames: bool,
+    /// Decoded frames read while a chunk was written (keep-alives, upgrade frames, ...), in
+    /// arrival order. They are already decrypted, so `handle()` only has to process them.
+    pending_frames: VecDeque<OfflineFrame>,
+    /// The peer cancelled while we were sending: `send_payloads` ends the session with `NotAnError`.
+    peer_cancelled: bool,
+    /// The user cancelled and `cancel_peer` has closed the session: `send_payloads` ends it
+    /// with `NotAnError` instead of leaving the cancel message to a second `handle()`.
+    user_cancelled: bool,
     pub state: InnerState,
     sender: Sender<ChannelMessage>,
     receiver: Receiver<ChannelMessage>,
@@ -166,8 +178,13 @@ impl OutboundRequest {
             socket,
             length_buf: [0; 4],
             length_filled: 0,
+            frame_buf: Vec::new(),
+            frame_filled: 0,
             keep_alives_ignored: 0,
             plain_frames: false,
+            pending_frames: VecDeque::new(),
+            peer_cancelled: false,
+            user_cancelled: false,
             state: InnerState {
                 id,
                 server_seq: 0,
@@ -192,6 +209,14 @@ impl OutboundRequest {
     }
 
     pub async fn handle(&mut self) -> Result<(), anyhow::Error> {
+        // Frames that arrived while a chunk was being written come first, in order.
+        if self.replay_pending_frames().await? {
+            if self.upgrade.take_hold_released() {
+                self.send_payloads().await?;
+            }
+            return Ok(());
+        }
+
         tokio::select! {
             i = self.receiver.recv() => {
                 match i {
@@ -210,7 +235,7 @@ impl OutboundRequest {
                                         },
                                         true,
                                     ).await;
-                                    self.disconnection().await?;
+                                    self.cancel_peer(&[]).await;
                                     return Err(anyhow!(crate::errors::AppError::NotAnError));
                                 },
                                 _ => {}
@@ -222,7 +247,14 @@ impl OutboundRequest {
                     }
                 }
             },
-            h = read_length_prefix(&mut self.socket, &mut self.length_buf, &mut self.length_filled) => {
+            h = read_frame(
+                &mut self.socket,
+                &mut self.length_buf,
+                &mut self.length_filled,
+                &mut self.frame_buf,
+                &mut self.frame_filled,
+                SANE_FRAME_LENGTH as usize,
+            ) => {
                 self._handle(h?).await?
             },
             ev = self.upgrade.next_event() => {
@@ -237,18 +269,16 @@ impl OutboundRequest {
         Ok(())
     }
 
-    pub async fn _handle(&mut self, length_buf: [u8; 4]) -> Result<(), anyhow::Error> {
-        let msg_length = u32::from_be_bytes(length_buf) as usize;
-        // Ensure the message length is not unreasonably big to avoid allocation attacks
-        if msg_length > SANE_FRAME_LENGTH as usize {
-            error!("Message length too big");
-            return Err(anyhow!("value"));
+    /// Processes the frames kept by `send_unless_cancelled`. Returns whether there were any.
+    async fn replay_pending_frames(&mut self) -> Result<bool, anyhow::Error> {
+        let replayed = !self.pending_frames.is_empty();
+        while let Some(offline) = self.pending_frames.pop_front() {
+            self.process_offline_frame(&offline).await?;
         }
+        Ok(replayed)
+    }
 
-        // Allocate buffer for the actual message and read it
-        let mut frame_data = vec![0u8; msg_length];
-        stream_read_exact(&mut self.socket, &mut frame_data).await?;
-
+    pub async fn _handle(&mut self, frame_data: Vec<u8>) -> Result<(), anyhow::Error> {
         let current_state = &self.state;
         // Now determine what will be the request type based on current state
         match current_state.state {
@@ -530,7 +560,21 @@ impl OutboundRequest {
         &mut self,
         smsg: &SecureMessage,
     ) -> Result<(), anyhow::Error> {
-        let mut hmac = HmacSha256::new_from_slice(self.state.recv_hmac_key.as_ref().unwrap())?;
+        let offline = Self::decrypt_secure_message(&mut self.state, smsg)?;
+        self.process_offline_frame(&offline).await
+    }
+
+    /// Verifies and decrypts a SecureMessage from the peer, consuming one client sequence number.
+    /// Takes the state instead of `self` so it can run while the socket is borrowed.
+    fn decrypt_secure_message(
+        state: &mut InnerState,
+        smsg: &SecureMessage,
+    ) -> Result<OfflineFrame, anyhow::Error> {
+        let recv_hmac_key = state
+            .recv_hmac_key
+            .as_ref()
+            .ok_or_else(|| anyhow!("Missing the receive HMAC key"))?;
+        let mut hmac = HmacSha256::new_from_slice(recv_hmac_key)?;
         hmac.update(&smsg.header_and_body);
         if !hmac
             .finalize()
@@ -544,7 +588,10 @@ impl OutboundRequest {
         let header_and_body = HeaderAndBody::decode(&*smsg.header_and_body)?;
 
         let msg_data = header_and_body.body;
-        let key = self.state.decrypt_key.as_ref().unwrap();
+        let key = state
+            .decrypt_key
+            .as_ref()
+            .ok_or_else(|| anyhow!("Missing the decryption key"))?;
 
         let mut cipher = Cipher::new_256(key[..AES_256_KEY_LEN].try_into()?);
         cipher.set_auto_padding(true);
@@ -552,7 +599,8 @@ impl OutboundRequest {
 
         let d2d_msg = DeviceToDeviceMessage::decode(&*decrypted)?;
 
-        let seq = self.get_client_seq_inc().await;
+        state.client_seq += 1;
+        let seq = state.client_seq;
         if d2d_msg.sequence_number() != seq {
             return Err(anyhow!(
                 "Error d2d_msg.sequence_number invalid ({} vs {})",
@@ -561,8 +609,9 @@ impl OutboundRequest {
             ));
         }
 
-        let offline = location_nearby_connections::OfflineFrame::decode(d2d_msg.message())?;
-        self.process_offline_frame(&offline).await
+        Ok(location_nearby_connections::OfflineFrame::decode(
+            d2d_msg.message(),
+        )?)
     }
 
     async fn process_offline_frame(&mut self, offline: &OfflineFrame) -> Result<(), anyhow::Error> {
@@ -1163,7 +1212,7 @@ impl OutboundRequest {
                                             true,
                                         )
                                         .await;
-                                        self.disconnection().await?;
+                                        self.cancel_peer(&[]).await;
                                         break 'send_all_files;
                                     }
                                     _ => {}
@@ -1334,6 +1383,11 @@ impl OutboundRequest {
                 }
             }
         }
+        if self.peer_cancelled || self.user_cancelled {
+            // Like the Cancel frame handled in `process_transfer_setup`: end the session now
+            // instead of waiting for a peer that may never close the socket.
+            return Err(anyhow!(crate::errors::AppError::NotAnError));
+        }
         Ok(())
     }
 
@@ -1403,7 +1457,11 @@ impl OutboundRequest {
     /// Sends a payload frame. A write that cannot finish (the peer cancelled or stopped reading,
     /// so the socket buffers are full) would block this task for ever and with it the user's
     /// cancel: the write is raced against a cancel of this transfer and given `stall` to make
-    /// progress. `Ok(false)` means the user cancelled and the session is closed.
+    /// progress. It is also raced against the peer's own frames, which are not read otherwise
+    /// while chunks are written: a cancel or disconnection from the peer ends the send, and so
+    /// does the loss of the connection. Any other frame (keep-alive, upgrade frame, payload ACK)
+    /// is kept, decoded, and handled by the next `handle()`, up to `MAX_PENDING_FRAMES`.
+    /// `Ok(false)` means the transfer was cancelled (by the user or the peer) and is over.
     async fn send_unless_cancelled(
         &mut self,
         frame: &OfflineFrame,
@@ -1411,17 +1469,93 @@ impl OutboundRequest {
         transfer_id: &str,
         stall: Duration,
     ) -> Result<bool, anyhow::Error> {
-        let sent = tokio::select! {
-            r = tokio::time::timeout(stall, self.encrypt_and_send(frame)) => Some(r),
-            () = wait_for_cancel(cancel_rx, transfer_id) => None,
+        enum Outcome {
+            Written(Result<std::io::Result<()>, tokio::time::error::Elapsed>),
+            UserCancel,
+            PeerCancel,
+            /// The connection broke: closed, reset or timed out.
+            Lost(std::io::Error),
+            Failed(anyhow::Error),
+        }
+
+        // Needs `&mut self`, which the borrowed socket below rules out.
+        let data = length_prefixed(&self.frame_payload(frame).await?);
+        // How much of `data` is on the wire: a write dropped by the select below leaves it
+        // known, so a cancel can tell a clean frame boundary from a frame cut in the middle.
+        let mut written = 0;
+        let outcome = {
+            let (mut reader, mut writer) = tokio::io::split(&mut self.socket);
+            let write = tokio::time::timeout(stall, async {
+                while written < data.len() {
+                    let n = writer.write(&data[written..]).await?;
+                    if n == 0 {
+                        return Err(std::io::ErrorKind::WriteZero.into());
+                    }
+                    written += n;
+                }
+                writer.flush().await
+            });
+            let mut write = std::pin::pin!(write);
+            let mut cancel = std::pin::pin!(wait_for_cancel(cancel_rx, transfer_id));
+            loop {
+                tokio::select! {
+                    // A finished write wins over a frame that is already waiting, so a peer that
+                    // closes right after the last chunk does not turn a sent file into a cancel.
+                    biased;
+                    r = &mut write => break Outcome::Written(r),
+                    () = &mut cancel => break Outcome::UserCancel,
+                    // Cancel-safe: a frame cut short by the end of the write resumes in `handle`.
+                    r = read_frame(
+                        &mut reader,
+                        &mut self.length_buf,
+                        &mut self.length_filled,
+                        &mut self.frame_buf,
+                        &mut self.frame_filled,
+                        SANE_FRAME_LENGTH as usize,
+                    ) => match r {
+                        Ok(peer_frame) => match Self::decode_peer_frame(
+                            &mut self.state,
+                            self.plain_frames,
+                            &peer_frame,
+                        ) {
+                            Ok(offline) if Self::is_cancel_frame(&offline) => {
+                                break Outcome::PeerCancel;
+                            }
+                            Ok(offline) if self.pending_frames.len() < MAX_PENDING_FRAMES => {
+                                self.pending_frames.push_back(offline);
+                            }
+                            Ok(_) => warn!("Too many peer frames during a send, dropping one"),
+                            Err(e) => break Outcome::Failed(e),
+                        },
+                        Err(e) => break Outcome::Lost(e),
+                    },
+                }
+            }
         };
-        match sent {
-            Some(Ok(result)) => result.map(|()| true),
-            Some(Err(_)) => Err(anyhow!(
-                "the peer stopped reading: a write made no progress for {}s",
-                stall.as_secs()
-            )),
-            None => {
+        match outcome {
+            Outcome::Written(Ok(Ok(()))) => Ok(true),
+            // Reset, broken pipe or end of stream: the manager moves the transfer to
+            // `Disconnected` when this error comes out of `handle`.
+            Outcome::Written(Ok(Err(e))) | Outcome::Lost(e) => {
+                info!("Transfer lost the peer while sending: {e}");
+                Err(anyhow!("lost the peer while sending: {e}"))
+            }
+            Outcome::Written(Err(_)) => {
+                info!(
+                    "Transfer lost the peer while sending: no progress for {}s",
+                    stall.as_secs()
+                );
+                Err(anyhow!(
+                    "the peer stopped reading: a write made no progress for {}s",
+                    stall.as_secs()
+                ))
+            }
+            Outcome::Failed(e) => Err(e),
+            Outcome::PeerCancel => {
+                info!("Transfer canceled by the peer while sending");
+                self.peer_cancelled = true;
+                // No disconnection frame: the peer is gone and the write may have been cut
+                // in the middle of a frame.
                 self.update_state(
                     |e| {
                         e.state = TransferState::Cancelled;
@@ -1429,10 +1563,96 @@ impl OutboundRequest {
                     true,
                 )
                 .await;
-                // Best effort: the peer may not be reading at all.
-                let _ = tokio::time::timeout(Duration::from_secs(2), self.disconnection()).await;
                 Ok(false)
             }
+            Outcome::UserCancel => {
+                self.update_state(
+                    |e| {
+                        e.state = TransferState::Cancelled;
+                    },
+                    true,
+                )
+                .await;
+                // A frame cut in the middle must be completed before anything else goes out;
+                // nothing sent yet (or all of it) is a clean boundary.
+                let unsent = if written == 0 { &[][..] } else { &data[written..] };
+                self.cancel_peer(unsent).await;
+                Ok(false)
+            }
+        }
+    }
+
+    /// Decodes a frame read while sending, decrypting it (one client sequence number) if needed.
+    fn decode_peer_frame(
+        state: &mut InnerState,
+        plain_frames: bool,
+        data: &[u8],
+    ) -> Result<OfflineFrame, anyhow::Error> {
+        Ok(if plain_frames {
+            OfflineFrame::decode(data)?
+        } else {
+            Self::decrypt_secure_message(state, &SecureMessage::decode(data)?)?
+        })
+    }
+
+    /// Whether a frame read while sending is the peer cancelling: a Disconnection, or a
+    /// Cancel of the sharing protocol.
+    fn is_cancel_frame(offline: &OfflineFrame) -> bool {
+        let Some(v1) = offline.v1.as_ref() else {
+            return false;
+        };
+        match v1.r#type() {
+            location_nearby_connections::v1_frame::FrameType::Disconnection => true,
+            location_nearby_connections::v1_frame::FrameType::PayloadTransfer => v1
+                .payload_transfer
+                .as_ref()
+                .filter(|p| {
+                    p.payload_header.as_ref().map(|h| h.r#type())
+                        == Some(payload_header::PayloadType::Bytes)
+                })
+                .and_then(|p| p.payload_chunk.as_ref())
+                .and_then(|c| c.body.as_deref())
+                .and_then(|b| sharing_nearby::Frame::decode(b).ok())
+                .and_then(|f| f.v1)
+                .is_some_and(|f| f.r#type() == sharing_nearby::v1_frame::FrameType::Cancel),
+            _ => false,
+        }
+    }
+
+    /// Tells the peer that the user cancelled and closes our side, all within `CANCEL_TIMEOUT`;
+    /// failures are only logged, the session is over anyway. Sends the sharing Cancel, then
+    /// the Disconnection, then a FIN, and waits for the peer to close so that the caller
+    /// releases the Wi-Fi link only after the frames left the socket buffers (a send queue
+    /// full of file data is not empty when the writes return).
+    ///
+    /// `unsent` is the rest of a frame whose write was interrupted. It goes out first: a new
+    /// frame in the middle of it would corrupt the stream. It can be large (a chunk) and the
+    /// peer may not be reading; then the timeout ends the attempt and the caller drops the
+    /// socket, which closes it.
+    async fn cancel_peer(&mut self, unsent: &[u8]) {
+        info!("Transfer canceled by the user");
+        self.user_cancelled = true;
+        let closing = async {
+            let sent: Result<(), anyhow::Error> = async {
+                if !unsent.is_empty() {
+                    self.socket.write_all(unsent).await?;
+                }
+                self.send_encrypted_frame(&sharing_cancel_frame()).await?;
+                self.disconnection().await
+            }
+            .await;
+            if let Err(e) = sent {
+                debug!("Cancel frames not sent: {e}");
+            }
+            if let Err(e) = self.socket.shutdown().await {
+                debug!("Closing the write half failed: {e}");
+            }
+            // Ends when the peer closes (or resets) after reading everything we sent.
+            let mut sink = [0u8; 4096];
+            while matches!(self.socket.read(&mut sink).await, Ok(n) if n > 0) {}
+        };
+        if tokio::time::timeout(CANCEL_TIMEOUT, closing).await.is_err() {
+            debug!("The peer did not close after the cancel in time");
         }
     }
 
@@ -1611,8 +1831,14 @@ impl OutboundRequest {
     /// The one place that chooses the framing: SecureMessage, or plain after an upgrade
     /// with disabled encryption.
     async fn encrypt_and_send(&mut self, frame: &OfflineFrame) -> Result<(), anyhow::Error> {
+        let data = self.frame_payload(frame).await?;
+        self.send_frame(data).await
+    }
+
+    /// The bytes of `frame` as they go on the wire after the length prefix.
+    async fn frame_payload(&mut self, frame: &OfflineFrame) -> Result<Vec<u8>, anyhow::Error> {
         if self.plain_frames {
-            return self.send_frame(frame.encode_to_vec()).await;
+            return Ok(frame.encode_to_vec());
         }
         let d2d_msg = DeviceToDeviceMessage {
             sequence_number: Some(self.get_server_seq_inc().await),
@@ -1653,9 +1879,7 @@ impl OutboundRequest {
             signature: result.into_bytes().to_vec(),
         };
 
-        self.send_frame(smsg.encode_to_vec()).await?;
-
-        Ok(())
+        Ok(smsg.encode_to_vec())
     }
 
     async fn send_keepalive(&mut self, ack: bool) -> Result<(), anyhow::Error> {
@@ -1676,20 +1900,7 @@ impl OutboundRequest {
     }
 
     async fn send_frame(&mut self, data: Vec<u8>) -> Result<(), anyhow::Error> {
-        let length = data.len();
-
-        // Prepare length prefix in big-endian format
-        let length_bytes = [
-            (length >> 24) as u8,
-            (length >> 16) as u8,
-            (length >> 8) as u8,
-            length as u8,
-        ];
-
-        let mut prefixed_length = Vec::with_capacity(length + 4);
-        prefixed_length.extend_from_slice(&length_bytes);
-        prefixed_length.extend_from_slice(&data);
-
+        let prefixed_length = length_prefixed(&data);
         self.socket.write_all(&prefixed_length).await?;
         self.socket.flush().await?;
 
@@ -1706,18 +1917,6 @@ impl OutboundRequest {
         .await;
 
         self.state.server_seq
-    }
-
-    async fn get_client_seq_inc(&mut self) -> i32 {
-        self.update_state(
-            |e| {
-                e.client_seq += 1;
-            },
-            false,
-        )
-        .await;
-
-        self.state.client_seq
     }
 
     async fn update_state<F>(&mut self, f: F, inform: bool)
@@ -1745,6 +1944,28 @@ impl OutboundRequest {
     }
 }
 
+/// `[length][data]` as it goes on the wire, the length being big-endian.
+fn length_prefixed(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len() + 4);
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.extend_from_slice(data);
+    out
+}
+
+/// How long the cancel frames, the close and the peer's reply to it may take together.
+pub(super) const CANCEL_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// The sharing-level Cancel, sent as a Bytes payload like the phones do.
+pub(super) fn sharing_cancel_frame() -> sharing_nearby::Frame {
+    sharing_nearby::Frame {
+        version: Some(sharing_nearby::frame::Version::V1.into()),
+        v1: Some(sharing_nearby::V1Frame {
+            r#type: Some(sharing_nearby::v1_frame::FrameType::Cancel.into()),
+            ..Default::default()
+        }),
+    }
+}
+
 /// How long one write may make no progress before the peer is taken to have stopped reading.
 const SEND_STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -1769,6 +1990,7 @@ async fn wait_for_cancel(rx: &mut Receiver<ChannelMessage>, id: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncReadExt;
 
     /// After an upgrade with disabled encryption frames are bare OfflineFrames both ways.
     #[tokio::test]
@@ -1833,6 +2055,15 @@ mod tests {
         assert!(err.to_string().contains("only sent keep-alives"), "{err}");
     }
 
+    fn is_peer_cancel(
+        state: &mut InnerState,
+        plain_frames: bool,
+        data: &[u8],
+    ) -> Result<bool, anyhow::Error> {
+        let offline = OutboundRequest::decode_peer_frame(state, plain_frames, data)?;
+        Ok(OutboundRequest::is_cancel_frame(&offline))
+    }
+
     fn plain_request(
         peer_buffer: usize,
     ) -> (
@@ -1881,6 +2112,96 @@ mod tests {
         }
     }
 
+    /// The next plain frame the peer reads, `None` at the end of the stream.
+    async fn read_plain_frame(peer: &mut tokio::io::DuplexStream) -> Option<OfflineFrame> {
+        let mut len = [0u8; 4];
+        peer.read_exact(&mut len).await.ok()?;
+        let mut body = vec![0u8; u32::from_be_bytes(len) as usize];
+        peer.read_exact(&mut body).await.ok()?;
+        Some(OfflineFrame::decode(&*body).unwrap())
+    }
+
+    /// A cancel while a frame is half written: the frame is completed, then the sharing Cancel
+    /// and the Disconnection follow, then the stream ends (FIN) and the call waits for the
+    /// peer to close.
+    #[tokio::test]
+    async fn a_user_cancel_mid_write_completes_the_frame_then_cancels_and_closes() {
+        let (mut req, mut peer, bus) = plain_request(64);
+        let mut cancel_rx = bus.subscribe();
+        let send = tokio::spawn(async move {
+            let sent = req
+                .send_unless_cancelled(&big_frame(), &mut cancel_rx, "id", Duration::from_secs(30))
+                .await;
+            (sent.unwrap(), req.state.state, req.user_cancelled)
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        bus.send(ChannelMessage {
+            id: "id".into(),
+            msg: channel::Message::Lib {
+                action: TransferAction::TransferCancel,
+            },
+        })
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let first = read_plain_frame(&mut peer).await.unwrap();
+        assert_eq!(first, big_frame(), "the cut frame was not completed");
+        let cancel = read_plain_frame(&mut peer).await.unwrap();
+        assert!(OutboundRequest::is_cancel_frame(&cancel));
+        assert!(cancel.v1.unwrap().disconnection.is_none());
+        let _last_chunk = read_plain_frame(&mut peer).await.unwrap();
+        let disconnection = read_plain_frame(&mut peer).await.unwrap();
+        assert_eq!(
+            disconnection.v1.unwrap().r#type(),
+            location_nearby_connections::v1_frame::FrameType::Disconnection
+        );
+        assert!(read_plain_frame(&mut peer).await.is_none(), "no FIN after the cancel");
+        drop(peer);
+        let (sent, state, user_cancelled) = tokio::time::timeout(Duration::from_secs(5), send)
+            .await
+            .expect("the cancel did not return")
+            .unwrap();
+        assert!(!sent);
+        assert_eq!(state, TransferState::Cancelled);
+        assert!(user_cancelled);
+    }
+
+    /// A cancel between two writes: the Cancel and the Disconnection go out, then the FIN, and
+    /// `handle()` ends the session.
+    #[tokio::test]
+    async fn a_user_cancel_between_writes_sends_cancel_and_disconnection_then_closes() {
+        let (mut req, mut peer, bus) = plain_request(1 << 16);
+        let handle = tokio::spawn(async move { req.handle().await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        bus.send(ChannelMessage {
+            id: "id".into(),
+            msg: channel::Message::Lib {
+                action: TransferAction::TransferCancel,
+            },
+        })
+        .unwrap();
+
+        let cancel = read_plain_frame(&mut peer).await.unwrap();
+        assert!(OutboundRequest::is_cancel_frame(&cancel));
+        let _last_chunk = read_plain_frame(&mut peer).await.unwrap();
+        let disconnection = read_plain_frame(&mut peer).await.unwrap();
+        assert_eq!(
+            disconnection.v1.unwrap().r#type(),
+            location_nearby_connections::v1_frame::FrameType::Disconnection
+        );
+        assert!(read_plain_frame(&mut peer).await.is_none(), "no FIN after the cancel");
+        drop(peer);
+        let err = tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("handle() did not end")
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(
+            err.downcast_ref(),
+            Some(crate::errors::AppError::NotAnError)
+        ));
+    }
+
     /// The peer never reads and the buffer is tiny: the write blocks, yet a cancel gets through.
     #[tokio::test]
     async fn a_blocked_write_does_not_keep_a_cancel_from_the_user() {
@@ -1906,6 +2227,284 @@ mod tests {
             .unwrap();
         assert!(!sent);
         assert_eq!(state, TransferState::Cancelled);
+    }
+
+    /// The phone cancels while our write is blocked: it is noticed at once, after the harmless
+    /// keep-alive that came before it, instead of after the stall timeout.
+    #[tokio::test]
+    async fn a_peer_disconnection_ends_a_blocked_write() {
+        let (mut req, mut peer, bus) = plain_request(64);
+        let mut cancel_rx = bus.subscribe();
+        let send = tokio::spawn(async move {
+            let sent = req
+                .send_unless_cancelled(&big_frame(), &mut cancel_rx, "id", Duration::from_secs(30))
+                .await;
+            (sent.unwrap(), req.state.state)
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        crate::upgrade::tests::write_plain_keep_alive(&mut peer).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!send.is_finished(), "a keep-alive ended the send");
+        let disconnection = OfflineFrame {
+            version: Some(location_nearby_connections::offline_frame::Version::V1.into()),
+            v1: Some(location_nearby_connections::V1Frame {
+                r#type: Some(
+                    location_nearby_connections::v1_frame::FrameType::Disconnection.into(),
+                ),
+                ..Default::default()
+            }),
+        };
+        peer.write_all(&length_prefixed(&disconnection.encode_to_vec()))
+            .await
+            .unwrap();
+        let (sent, state) = tokio::time::timeout(Duration::from_secs(5), send)
+            .await
+            .expect("the peer's disconnection was not noticed during a blocked write")
+            .unwrap();
+        assert!(!sent);
+        assert_eq!(state, TransferState::Cancelled);
+    }
+
+    fn keep_alive_frame() -> OfflineFrame {
+        OfflineFrame {
+            version: Some(location_nearby_connections::offline_frame::Version::V1.into()),
+            v1: Some(location_nearby_connections::V1Frame {
+                r#type: Some(location_nearby_connections::v1_frame::FrameType::KeepAlive.into()),
+                keep_alive: Some(KeepAliveFrame { ack: Some(false) }),
+                ..Default::default()
+            }),
+        }
+    }
+
+    /// A sharing-protocol frame of the given type, carried as a Bytes payload like the phone does.
+    fn sharing_frame_payload(
+        frame_type: sharing_nearby::v1_frame::FrameType,
+        payload_type: payload_header::PayloadType,
+    ) -> OfflineFrame {
+        let sharing = sharing_nearby::Frame {
+            version: Some(sharing_nearby::frame::Version::V1.into()),
+            v1: Some(sharing_nearby::V1Frame {
+                r#type: Some(frame_type.into()),
+                ..Default::default()
+            }),
+        };
+        OfflineFrame {
+            version: Some(location_nearby_connections::offline_frame::Version::V1.into()),
+            v1: Some(location_nearby_connections::V1Frame {
+                r#type: Some(
+                    location_nearby_connections::v1_frame::FrameType::PayloadTransfer.into(),
+                ),
+                payload_transfer: Some(PayloadTransferFrame {
+                    packet_type: Some(PacketType::Data.into()),
+                    payload_header: Some(PayloadHeader {
+                        id: Some(1),
+                        r#type: Some(payload_type.into()),
+                        ..Default::default()
+                    }),
+                    payload_chunk: Some(PayloadChunk {
+                        offset: Some(0),
+                        flags: Some(0),
+                        body: Some(sharing.encode_to_vec()),
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        }
+    }
+
+    fn sharing_cancel() -> OfflineFrame {
+        sharing_frame_payload(
+            sharing_nearby::v1_frame::FrameType::Cancel,
+            payload_header::PayloadType::Bytes,
+        )
+    }
+
+    /// What the peer puts on the wire (after the length prefix) in an encrypted session: the
+    /// mirror of `frame_payload`, using the keys our side receives with.
+    fn peer_secure_message(state: &InnerState, seq: i32, frame: &OfflineFrame) -> Vec<u8> {
+        let d2d = DeviceToDeviceMessage {
+            sequence_number: Some(seq),
+            message: Some(frame.encode_to_vec()),
+        };
+        let key = state.decrypt_key.as_ref().unwrap();
+        let iv = gen_random(16);
+        let mut cipher = Cipher::new_256(&key[..AES_256_KEY_LEN].try_into().unwrap());
+        cipher.set_auto_padding(true);
+        let hb = HeaderAndBody {
+            body: cipher.cbc_encrypt(&iv, &d2d.encode_to_vec()),
+            header: Header {
+                encryption_scheme: EncScheme::Aes256Cbc.into(),
+                signature_scheme: SigScheme::HmacSha256.into(),
+                iv: Some(iv),
+                public_metadata: Some(
+                    GcmMetadata {
+                        r#type: Type::DeviceToDeviceMessage.into(),
+                        version: Some(1),
+                    }
+                    .encode_to_vec(),
+                ),
+                ..Default::default()
+            },
+        };
+        let mut hmac = HmacSha256::new_from_slice(state.recv_hmac_key.as_ref().unwrap()).unwrap();
+        hmac.update(&hb.encode_to_vec());
+        SecureMessage {
+            header_and_body: hb.encode_to_vec(),
+            signature: hmac.finalize().into_bytes().to_vec(),
+        }
+        .encode_to_vec()
+    }
+
+    /// The sharing Cancel is recognised only as a Bytes payload; other sharing frames and other
+    /// payload types are of no use to a send in progress.
+    #[test]
+    fn only_a_bytes_payload_carrying_cancel_is_a_peer_cancel() {
+        let mut state = InnerState::default();
+        let mut check = |frame: &OfflineFrame| {
+            is_peer_cancel(&mut state, true, &frame.encode_to_vec()).unwrap()
+        };
+        assert!(check(&sharing_cancel()));
+        assert!(!check(&keep_alive_frame()));
+        assert!(!check(&sharing_frame_payload(
+            sharing_nearby::v1_frame::FrameType::Response,
+            payload_header::PayloadType::Bytes,
+        )));
+        assert!(!check(&sharing_frame_payload(
+            sharing_nearby::v1_frame::FrameType::Cancel,
+            payload_header::PayloadType::File,
+        )));
+    }
+
+    /// The phone's sharing Cancel (not a Disconnection) ends a blocked write too.
+    #[tokio::test]
+    async fn a_peer_sharing_cancel_ends_a_blocked_write() {
+        let (mut req, mut peer, bus) = plain_request(64);
+        let mut cancel_rx = bus.subscribe();
+        let send = tokio::spawn(async move {
+            let sent = req
+                .send_unless_cancelled(&big_frame(), &mut cancel_rx, "id", Duration::from_secs(30))
+                .await;
+            (sent.unwrap(), req.state.state)
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        peer.write_all(&length_prefixed(&sharing_cancel().encode_to_vec()))
+            .await
+            .unwrap();
+        let (sent, state) = tokio::time::timeout(Duration::from_secs(5), send)
+            .await
+            .expect("the peer's cancel was not noticed during a blocked write")
+            .unwrap();
+        assert!(!sent);
+        assert_eq!(state, TransferState::Cancelled);
+    }
+
+    /// A keep-alive read while a chunk is written neither ends the send nor is lost: the next
+    /// `handle()` answers it.
+    #[tokio::test]
+    async fn a_frame_read_during_a_write_is_handled_afterwards() {
+        let (mut req, mut peer, bus) = plain_request(64);
+        req.state.encryption_done = false;
+        let mut cancel_rx = bus.subscribe();
+        let send = tokio::spawn(async move {
+            let sent = req
+                .send_unless_cancelled(&big_frame(), &mut cancel_rx, "id", Duration::from_secs(30))
+                .await;
+            (sent.unwrap(), req)
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        crate::upgrade::tests::write_plain_keep_alive(&mut peer).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!send.is_finished(), "a keep-alive ended the send");
+
+        // Drain the chunk so the write completes.
+        let mut chunk = vec![0u8; big_frame().encode_to_vec().len() + 4];
+        peer.read_exact(&mut chunk).await.unwrap();
+        let (sent, mut req) = tokio::time::timeout(Duration::from_secs(5), send)
+            .await
+            .expect("the send did not finish")
+            .unwrap();
+        assert!(sent);
+        assert_eq!(req.pending_frames.len(), 1);
+
+        tokio::time::timeout(Duration::from_secs(5), req.handle())
+            .await
+            .expect("handle() did not replay the frame")
+            .unwrap();
+        assert!(req.pending_frames.is_empty());
+        let mut len = [0u8; 4];
+        peer.read_exact(&mut len).await.unwrap();
+        let mut body = vec![0u8; u32::from_be_bytes(len) as usize];
+        peer.read_exact(&mut body).await.unwrap();
+        let reply = OfflineFrame::decode(&*body).unwrap();
+        let v1 = reply.v1.unwrap();
+        assert_eq!(
+            v1.r#type(),
+            location_nearby_connections::v1_frame::FrameType::KeepAlive
+        );
+        assert_eq!(v1.keep_alive.unwrap().ack, Some(true));
+    }
+
+    /// A reset or closed connection ends a blocked write at once, as an error the manager turns
+    /// into `Disconnected`.
+    #[tokio::test]
+    async fn a_closed_connection_ends_a_blocked_write_with_an_error() {
+        let (mut req, peer, bus) = plain_request(64);
+        let mut cancel_rx = bus.subscribe();
+        let send = tokio::spawn(async move {
+            req.send_unless_cancelled(&big_frame(), &mut cancel_rx, "id", Duration::from_secs(30))
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(peer);
+        let err = tokio::time::timeout(Duration::from_secs(5), send)
+            .await
+            .expect("the closed connection was not noticed during a blocked write")
+            .unwrap()
+            .unwrap_err();
+        assert!(err.to_string().contains("lost the peer while sending"), "{err}");
+    }
+
+    /// In an encrypted session every frame read while sending consumes one client sequence
+    /// number, the Cancel included, so a `handle()` after it still decrypts.
+    #[tokio::test]
+    async fn an_encrypted_peer_cancel_keeps_the_sequence_in_step() {
+        let (mut peer, ours) = tokio::io::duplex(1 << 16);
+        let (bus, _rx) = tokio::sync::broadcast::channel(8);
+        let mut req = OutboundRequest::new_over(
+            *b"SEND",
+            MigratableStream::Duplex(ours),
+            "id".into(),
+            bus,
+            OutboundPayload::Text {
+                text: "x".into(),
+                text_type: TextPayloadType::Text,
+            },
+            RemoteDeviceInfo {
+                device_type: crate::DeviceType::Unknown,
+                name: "test".into(),
+            },
+        );
+        req.state.state = TransferState::SendingFiles;
+        req.state.decrypt_key = Some(vec![1; 32]);
+        req.state.recv_hmac_key = Some(vec![2; 32]);
+        req.state.encrypt_key = Some(vec![3; 32]);
+        req.state.send_hmac_key = Some(vec![4; 32]);
+
+        let keep_alive = peer_secure_message(&req.state, 1, &keep_alive_frame());
+        assert!(!is_peer_cancel(&mut req.state, false, &keep_alive).unwrap());
+        assert_eq!(req.state.client_seq, 1);
+        let cancel = peer_secure_message(&req.state, 2, &sharing_cancel());
+        assert!(is_peer_cancel(&mut req.state, false, &cancel).unwrap());
+        assert_eq!(req.state.client_seq, 2);
+
+        let next = peer_secure_message(&req.state, 3, &keep_alive_frame());
+        peer.write_all(&length_prefixed(&next)).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), req.handle())
+            .await
+            .expect("handle() did not read the frame")
+            .expect("the frame after the Cancel was not decrypted");
+        assert_eq!(req.state.client_seq, 3);
     }
 
     /// A peer that stopped reading ends the session after the stall timeout instead of freezing it.

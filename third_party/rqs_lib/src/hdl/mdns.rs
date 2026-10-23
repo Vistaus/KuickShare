@@ -1,7 +1,8 @@
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mdns_sd::{AddrType, ServiceDaemon, ServiceInfo};
+use mdns_sd::{AddrType, IfKind, ServiceDaemon, ServiceInfo};
 use tokio::sync::watch;
 use tokio::time::{Instant, interval_at};
 use tokio_util::sync::CancellationToken;
@@ -14,6 +15,24 @@ const TICK_INTERVAL: Duration = Duration::from_secs(60);
 /// Android can miss a service registered before it started discovering (this used to be
 /// nudged by a BLE scan of nearby phones); announce again now and then while visible.
 const RESEND_INTERVAL: Duration = Duration::from_secs(30);
+
+/// A Wi-Fi Direct group or hotspot has no multicast route, so mDNS sends there fail with
+/// "Network is unreachable". Its subnet is 192.168.49.0/24 whether we host it (192.168.49.1)
+/// or join the phone's (a client address from the phone's DHCP).
+const HOTSPOT_SUBNET: [u8; 3] = [192, 168, 49];
+
+/// A daemon that stays off the hotspot subnet. `IfKind` has no subnet match, so every address
+/// of it is disabled up front: the choice outlives interface changes and also covers
+/// addresses that appear later.
+pub(crate) fn new_daemon() -> Result<ServiceDaemon, anyhow::Error> {
+    let daemon = ServiceDaemon::new()?;
+    let [a, b, c] = HOTSPOT_SUBNET;
+    let hotspot: Vec<IfKind> = (1..=254u8)
+        .map(|host| IfKind::Addr(IpAddr::V4(Ipv4Addr::new(a, b, c, host))))
+        .collect();
+    daemon.disable_interface(hotspot)?;
+    Ok(daemon)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Visibility {
@@ -51,7 +70,7 @@ impl MDnsServer {
         let service_info = Self::build_service(endpoint_id, service_port, DeviceType::Laptop)?;
 
         Ok(Self {
-            daemon: ServiceDaemon::new()?,
+            daemon: new_daemon()?,
             service_info,
             visibility_sender,
             visibility_receiver,

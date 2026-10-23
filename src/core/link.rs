@@ -43,8 +43,10 @@ const JOIN_BUDGET: Duration = Duration::from_secs(15);
 const JOIN_RETRY_DELAY: Duration = Duration::from_secs(1);
 /// Attempts before the SSID is also tried as hidden.
 const HIDDEN_AFTER: u32 = 2;
-/// Per attempt: scan results are polled this many times, `AP_POLL_DELAY` apart.
-const AP_POLLS: u32 = 6;
+/// Per attempt: scan results are polled this many times, `AP_POLL_DELAY` apart. The Galaxy's
+/// Wi-Fi Direct group was missing from the old 2.5 s window in every run (it showed up about 4 s
+/// after the offer, inferred from the retry), hence 4.5 s.
+const AP_POLLS: u32 = 10;
 const AP_POLL_DELAY: Duration = Duration::from_millis(500);
 /// Polls for the IPv4 address after the connection is up.
 const IP_POLLS: u32 = 5;
