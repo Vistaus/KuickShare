@@ -31,7 +31,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
 /// How long a connected socket gets to report a send MTU.
 const READY_TIMEOUT: Duration = Duration::from_secs(3);
 const READY_POLL: Duration = Duration::from_millis(20);
-const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the L2CAP dial waits for BlueZ to drop a stale link (the GATT path passes its own).
+const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const RECV_MTU: u16 = 4096;
 const ENOTCONN: i32 = 107;
 
@@ -99,7 +100,7 @@ async fn dial(adapter: &Adapter, scan: &ScanResult) -> Result<Stream, DialError>
         .address()
         .await
         .map_err(|e| DialError::Adapter(e.to_string()))?;
-    drop_stale_link(adapter, scan).await?;
+    drop_stale_link(adapter, scan, DISCONNECT_TIMEOUT).await?;
     sleep(SETTLE).await;
 
     let target = SocketAddr::new(scan.address, scan.address_type, psm);
@@ -131,8 +132,12 @@ async fn dial(adapter: &Adapter, scan: &ScanResult) -> Result<Stream, DialError>
     }
 }
 
-/// Disconnects the ACL link BlueZ holds to the phone, if any.
-pub(super) async fn drop_stale_link(adapter: &Adapter, scan: &ScanResult) -> Result<(), DialError> {
+/// Disconnects the ACL link BlueZ holds to the phone, if any, waiting `disconnect_timeout`.
+pub(super) async fn drop_stale_link(
+    adapter: &Adapter,
+    scan: &ScanResult,
+    disconnect_timeout: Duration,
+) -> Result<(), DialError> {
     let device = adapter
         .device(scan.address)
         .map_err(|e| DialError::Adapter(e.to_string()))?;
@@ -140,11 +145,11 @@ pub(super) async fn drop_stale_link(adapter: &Adapter, scan: &ScanResult) -> Res
         return Ok(());
     }
     debug!("{INNER_NAME}: dropping a stale ACL link");
-    match timeout(DISCONNECT_TIMEOUT, device.disconnect()).await {
+    match timeout(disconnect_timeout, device.disconnect()).await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => debug!("{INNER_NAME}: disconnect failed: {e}"),
         Err(_) => debug!(
-            "{INNER_NAME}: no answer to the disconnect within {DISCONNECT_TIMEOUT:?}; BlueZ closes the link later"
+            "{INNER_NAME}: no answer to the disconnect within {disconnect_timeout:?}; BlueZ closes the link later"
         ),
     }
     Ok(())

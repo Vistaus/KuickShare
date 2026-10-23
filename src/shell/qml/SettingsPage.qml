@@ -156,7 +156,7 @@ FormCard.FormCardPage {
     Kirigami.InlineMessage {
         visible: true // hidden by default
         type: Kirigami.MessageType.Warning
-        text: i18n("Experimental. Needs NetworkManager, its dnsmasq package and Bluetooth. While on, this computer is visible over Bluetooth to devices in range, and its Wi-Fi connection may drop while the hotspot is active. See the documentation.")
+        text: i18n("Experimental. Needs NetworkManager, its dnsmasq package and Bluetooth. While on, this computer is visible over Bluetooth to devices in range, and its Wi-Fi connection may drop while the temporary Wi-Fi link is active. See the documentation.")
         Layout.fillWidth: true
         Layout.topMargin: Kirigami.Units.largeSpacing
     }

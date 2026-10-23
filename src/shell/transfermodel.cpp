@@ -142,6 +142,22 @@ void TransferModel::update(const QString &id, const QVariantMap &info)
     endInsertRows();
 }
 
+quint64 TransferModel::beginPending(const QString &id, QVariantMap row)
+{
+    row.insert(QStringLiteral("kind"), QStringLiteral("outbound"));
+    row.insert(QStringLiteral("state"), QStringLiteral("Starting"));
+    update(id, row);
+    return ++m_pendingNumber[id];
+}
+
+void TransferModel::failPending(const QString &id, quint64 number)
+{
+    if (m_pendingNumber.value(id) == number && info(id).value(QStringLiteral("state")).toString() == QLatin1String("Starting"))
+    {
+        update(id, {{QStringLiteral("state"), QStringLiteral("Disconnected")}});
+    }
+}
+
 void TransferModel::addHistory(const QVariantMap &info)
 {
     beginInsertRows({}, m_entries.size(), m_entries.size());

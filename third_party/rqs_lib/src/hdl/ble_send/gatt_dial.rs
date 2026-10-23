@@ -96,7 +96,7 @@ async fn dial(
     started: Instant,
     disconnected: &mut bool,
 ) -> anyhow::Result<GattLink> {
-    drop_stale_link(adapter, scan).await?;
+    drop_stale_link(adapter, scan, DISCONNECT_TIMEOUT).await?;
     sleep(SETTLE).await;
 
     let mut failed = 0;
@@ -295,6 +295,18 @@ mod tests {
         assert_eq!(packet_size(Some(0)), 20);
         assert_eq!(packet_size(Some(100)), 100);
         assert_eq!(packet_size(Some(512)), 509);
+    }
+
+    #[test]
+    fn a_missing_device_object_is_told_from_other_errors() {
+        let err = |kind| bluer::Error {
+            kind,
+            message: String::new(),
+        };
+        assert!(device_gone(&err(ErrorKind::NotFound)));
+        assert!(device_gone(&err(ErrorKind::DoesNotExist)));
+        assert!(!device_gone(&err(ErrorKind::Failed)));
+        assert!(!device_gone(&err(ErrorKind::NotReady)));
     }
 
     #[test]

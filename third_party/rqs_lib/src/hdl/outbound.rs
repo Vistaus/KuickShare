@@ -57,8 +57,11 @@ type HmacSha256 = Hmac<Sha256>;
 
 const SANE_FRAME_LENGTH: i32 = 5 * 1024 * 1024;
 const SANITY_DURATION: Duration = Duration::from_micros(10);
-/// Peer frames read while a chunk is written and kept for the next `handle()`; more are dropped.
+/// Peer frames read while a chunk is written and kept for the next `handle()`; beyond this
+/// only the frames the transfer needs (upgrade negotiation) are still kept, the rest is dropped.
 const MAX_PENDING_FRAMES: usize = 32;
+/// Hard bound on the queue, whatever the frame, so a flooding peer cannot grow memory.
+const MAX_PENDING_FRAMES_HARD: usize = 256;
 
 #[derive(Debug, Clone)]
 pub enum OutboundPayload {
@@ -1475,6 +1478,8 @@ impl OutboundRequest {
             PeerCancel,
             /// The connection broke: closed, reset or timed out.
             Lost(std::io::Error),
+            /// The peer sent an oversized or invalid frame.
+            Invalid(std::io::Error),
             Failed(anyhow::Error),
         }
 
@@ -1521,12 +1526,19 @@ impl OutboundRequest {
                             Ok(offline) if Self::is_cancel_frame(&offline) => {
                                 break Outcome::PeerCancel;
                             }
-                            Ok(offline) if self.pending_frames.len() < MAX_PENDING_FRAMES => {
+                            Ok(offline)
+                                if self.pending_frames.len() < MAX_PENDING_FRAMES
+                                    || (self.pending_frames.len() < MAX_PENDING_FRAMES_HARD
+                                        && !Self::is_droppable_frame(&offline)) =>
+                            {
                                 self.pending_frames.push_back(offline);
                             }
                             Ok(_) => warn!("Too many peer frames during a send, dropping one"),
                             Err(e) => break Outcome::Failed(e),
                         },
+                        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                            break Outcome::Invalid(e);
+                        }
                         Err(e) => break Outcome::Lost(e),
                     },
                 }
@@ -1539,6 +1551,10 @@ impl OutboundRequest {
             Outcome::Written(Ok(Err(e))) | Outcome::Lost(e) => {
                 info!("Transfer lost the peer while sending: {e}");
                 Err(anyhow!("lost the peer while sending: {e}"))
+            }
+            Outcome::Invalid(e) => {
+                info!("Transfer got an invalid frame while sending: {e}");
+                Err(anyhow!("the peer sent an invalid frame while sending: {e}"))
             }
             Outcome::Written(Err(_)) => {
                 info!(
@@ -1592,6 +1608,18 @@ impl OutboundRequest {
             OfflineFrame::decode(data)?
         } else {
             Self::decrypt_secure_message(state, &SecureMessage::decode(data)?)?
+        })
+    }
+
+    /// Whether a frame read while sending can be lost when the queue is full: keep-alives and
+    /// payload ACKs/progress. Upgrade negotiation and any other frame must be kept.
+    fn is_droppable_frame(offline: &OfflineFrame) -> bool {
+        offline.v1.as_ref().is_some_and(|v1| {
+            matches!(
+                v1.r#type(),
+                location_nearby_connections::v1_frame::FrameType::KeepAlive
+                    | location_nearby_connections::v1_frame::FrameType::PayloadTransfer
+            )
         })
     }
 
@@ -2443,6 +2471,44 @@ mod tests {
             location_nearby_connections::v1_frame::FrameType::KeepAlive
         );
         assert_eq!(v1.keep_alive.unwrap().ack, Some(true));
+    }
+
+    /// Beyond the soft cap only keep-alives and payload frames may be lost.
+    #[test]
+    fn only_keep_alives_and_payload_frames_are_droppable() {
+        use location_nearby_connections::v1_frame::FrameType;
+        let frame = |t: FrameType| OfflineFrame {
+            version: Some(location_nearby_connections::offline_frame::Version::V1.into()),
+            v1: Some(location_nearby_connections::V1Frame {
+                r#type: Some(t.into()),
+                ..Default::default()
+            }),
+        };
+        assert!(OutboundRequest::is_droppable_frame(&frame(FrameType::KeepAlive)));
+        assert!(OutboundRequest::is_droppable_frame(&frame(FrameType::PayloadTransfer)));
+        assert!(!OutboundRequest::is_droppable_frame(&frame(
+            FrameType::BandwidthUpgradeNegotiation
+        )));
+        assert!(!OutboundRequest::is_droppable_frame(&OfflineFrame::default()));
+    }
+
+    /// An oversized frame from the peer is reported as invalid, not as a lost peer.
+    #[tokio::test]
+    async fn an_oversized_frame_during_a_write_is_reported_as_invalid() {
+        let (mut req, mut peer, bus) = plain_request(64);
+        let mut cancel_rx = bus.subscribe();
+        let send = tokio::spawn(async move {
+            req.send_unless_cancelled(&big_frame(), &mut cancel_rx, "id", Duration::from_secs(30))
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        peer.write_all(&[0x7f, 0xff, 0xff, 0xff]).await.unwrap();
+        let err = tokio::time::timeout(Duration::from_secs(5), send)
+            .await
+            .expect("the send did not finish")
+            .unwrap()
+            .unwrap_err();
+        assert!(err.to_string().contains("invalid frame"), "{err}");
     }
 
     /// A reset or closed connection ends a blocked write at once, as an error the manager turns

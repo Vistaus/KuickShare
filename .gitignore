@@ -2,3 +2,4 @@
 /dist/
 /build/flatpak/cargo-sources.json
 **/.vscode/
+**/__pycache__/

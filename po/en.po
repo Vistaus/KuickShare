@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kuickshare 1.0.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-23 09:10+0000\n"
+"POT-Creation-Date: 2026-10-23 09:32+0000\n"
 "PO-Revision-Date: 2026-10-18 00:00+0000\n"
 "Last-Translator: the-beper <193650145+the-beper@users.noreply.github.com>\n"
 "Language-Team: English\n"
@@ -40,7 +40,7 @@ msgstr ""
 msgid "Could not update the autostart entry"
 msgstr "Could not update the autostart entry"
 
-#: src/shell/corebridge.cpp:826
+#: src/shell/corebridge.cpp:814
 msgid "Only files can be shared, folders are not supported"
 msgstr "Only files can be shared, folders are not supported"
 
@@ -626,11 +626,9 @@ msgstr ""
 msgid ""
 "Experimental. Needs NetworkManager, its dnsmasq package and Bluetooth. While "
 "on, this computer is visible over Bluetooth to devices in range, and its Wi-"
-"Fi connection may drop while the hotspot is active. See the documentation."
-msgstr ""
-"Experimental. Needs NetworkManager, its dnsmasq package and Bluetooth. While "
-"on, this computer is visible over Bluetooth to devices in range, and its Wi-"
-"Fi connection may drop while the hotspot is active. See the documentation."
+"Fi connection may drop while the temporary Wi-Fi link is active. See the "
+"documentation."
+msgstr "Experimental. Needs NetworkManager, its dnsmasq package and Bluetooth. While on, this computer is visible over Bluetooth to devices in range, and its Wi-Fi connection may drop while the temporary Wi-Fi link is active. See the documentation."
 
 #: src/shell/qml/SettingsPage.qml:165
 msgid "Paired devices"

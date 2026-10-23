@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QAbstractListModel>
+#include <QHash>
 #include <QList>
 #include <QVariantMap>
 
@@ -36,6 +37,12 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     void update(const QString &id, const QVariantMap &info);
+    /// Adds the row of a send that the core has not reported yet (state "Starting") and returns its
+    /// number; the first `update` for the id takes the row over.
+    quint64 beginPending(const QString &id, QVariantMap row);
+    /// Ends that pending send as Disconnected, unless the core took it over or a newer send to the
+    /// same id began since.
+    void failPending(const QString &id, quint64 number);
     /// True for states a transfer never leaves.
     static bool isFinal(const QString &state);
     bool hasActive() const;
@@ -53,4 +60,5 @@ private:
         QVariantMap info;
     };
     QList<Entry> m_entries;
+    QHash<QString, quint64> m_pendingNumber;
 };

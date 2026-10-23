@@ -186,7 +186,7 @@ With **Settings → Wi-Fi Direct → Receive and send without a shared network**
 - When the last network connection drops (for example the Wi-Fi is turned off), the devices found over the network disappear from the Send page at once and a Bluetooth scan starts, so a phone that is still in range shows up with the Bluetooth icon after a few seconds. When a network comes back, the search for devices starts over at once, so a phone on it is found without waiting for the periodic check (up to about 30 s). This needs NetworkManager and the setting on.
 - A phone on the same network as the computer is reached over the network and never takes part in the upgrade; it is listed once, even if Bluetooth sees it too.
 - Plasma shows "Connection 'kuickshare-ap' activated" for the temporary link. It cannot be hidden per connection, only for all networks in System Settings → Notifications → Network Management.
-- When you press a device on the Send page, the Transfers page gets its row and a job appears in Plasma's job tracker at once; the job names the step: "Looking for the device…", "Connecting…", "Waiting for the other device to accept", then "Switching to Wi-Fi…" until data moves. It can be cancelled only from the last step on. When it finishes, the Send page is left empty; after a failure the files and text stay for a new attempt.
+- When you press a device on the Send page, the Transfers page gets its row and a job appears in Plasma's job tracker at once; the job names the step: "Looking for the device…", "Connecting…", "Waiting for the other device to accept", then "Switching to Wi-Fi…" until data moves. When it finishes, the Send page is left empty; after a failure the files and text stay for a new attempt.
 
 ## Transfers page and history
 

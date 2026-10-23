@@ -62,6 +62,30 @@ private Q_SLOTS:
         QCOMPARE(model.rowCount(), 2);
     }
 
+    void anOlderSendFailureDoesNotEndANewerSend()
+    {
+        TransferModel model;
+        const quint64 first = model.beginPending(QStringLiteral("a"), {{QStringLiteral("device"), QStringLiteral("Pixel")}});
+        model.failPending(QStringLiteral("a"), first);
+        QCOMPARE(stateAt(model, 0), QStringLiteral("Disconnected"));
+        const quint64 second = model.beginPending(QStringLiteral("a"), {{QStringLiteral("device"), QStringLiteral("Pixel")}});
+        QCOMPARE(model.rowCount(), 2);
+        QVERIFY(second != first);
+        model.failPending(QStringLiteral("a"), first); // the timer of the first send fires late
+        QCOMPARE(stateAt(model, 0), QStringLiteral("Starting"));
+        model.failPending(QStringLiteral("a"), second);
+        QCOMPARE(stateAt(model, 0), QStringLiteral("Disconnected"));
+    }
+
+    void failurePendingIgnoresASendTheCoreHasTakenOver()
+    {
+        TransferModel model;
+        const quint64 number = model.beginPending(QStringLiteral("a"), {});
+        model.update(QStringLiteral("a"), event(QStringLiteral("SentIntroduction")));
+        model.failPending(QStringLiteral("a"), number);
+        QCOMPARE(stateAt(model, 0), QStringLiteral("SentIntroduction"));
+    }
+
     void historyIsAppendedBelowLiveTransfers()
     {
         TransferModel model;

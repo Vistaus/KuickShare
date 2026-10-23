@@ -737,35 +737,23 @@ void CoreBridge::sendFiles(const QString &deviceId, const QStringList &paths)
 
 void CoreBridge::startSend(const QString &deviceId, QVariantMap row, const QString &method, const QVariantList &args, bool hasJob)
 {
-    const quint64 sendNo = ++m_sendNo[deviceId];
     // Show the row now: finding the device and connecting can take several seconds before the
     // core reports anything. The first TransferUpdated for this id takes it over.
-    row.insert(QStringLiteral("kind"), QStringLiteral("outbound"));
-    row.insert(QStringLiteral("state"), QStringLiteral("Starting"));
     row.insert(QStringLiteral("device"), m_devices.nameOf(deviceId));
-    m_transfers.update(deviceId, row);
+    const quint64 number = m_transfers.beginPending(deviceId, row);
     auto msg = methodCall(iface, method);
     msg.setArguments(args);
-    callAsync(msg, {}, [this, deviceId, sendNo, hasJob]
+    callAsync(msg, {}, [this, deviceId, number, hasJob]
               {
-                  failIfStarting(deviceId, sendNo);
+                  m_transfers.failPending(deviceId, number);
                   if (hasJob)
                   {
                       emit sendRefused(deviceId);
                   }
               });
     // The core's own watchdog covers Bluetooth sends only: do not leave a row at "Connecting…" for good.
-    QTimer::singleShot(45'000, this, [this, deviceId, sendNo]
-                       { failIfStarting(deviceId, sendNo); });
-}
-
-void CoreBridge::failIfStarting(const QString &deviceId, quint64 sendNo)
-{
-    const bool current = m_sendNo.value(deviceId) == sendNo;
-    if (current && m_transfers.info(deviceId).value(QStringLiteral("state")).toString() == QLatin1String("Starting"))
-    {
-        m_transfers.update(deviceId, {{QStringLiteral("state"), QStringLiteral("Disconnected")}});
-    }
+    QTimer::singleShot(45'000, this, [this, deviceId, number]
+                       { m_transfers.failPending(deviceId, number); });
 }
 
 void CoreBridge::sendText(const QString &deviceId, const QString &text, bool isUrl)

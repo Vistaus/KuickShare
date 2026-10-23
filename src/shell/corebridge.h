@@ -193,8 +193,6 @@ private Q_SLOTS:
     void onServiceUnregistered();
 
 private:
-    /// Ends a pending send row that the core never took over.
-    void failIfStarting(const QString &deviceId, quint64 sendNo);
     /// Adds the pending row for a send and calls `method`; `hasJob` is true when the shell tracks a Plasma job for it.
     void startSend(const QString &deviceId, QVariantMap row, const QString &method, const QVariantList &args, bool hasJob);
     void call(const QString &method, const QVariantList &args);
@@ -212,8 +210,6 @@ private:
     QProcess m_core;
     QTimer m_discoveryStopTimer;
     QHash<QString, int> m_outgoingFileCounts;
-    /// Number of the latest send per device, so a late failure never ends a newer send's row.
-    QHash<QString, quint64> m_sendNo;
     bool m_discoveryRunning = false;
     bool m_connected = false;
     bool m_serviceStarting = false;
