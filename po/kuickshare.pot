@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kuickshare 1.0.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-22 21:37+0000\n"
+"POT-Creation-Date: 2026-10-22 23:15+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -40,7 +40,7 @@ msgstr ""
 msgid "Could not update the autostart entry"
 msgstr ""
 
-#: src/shell/corebridge.cpp:787
+#: src/shell/corebridge.cpp:810
 msgid "Only files can be shared, folders are not supported"
 msgstr ""
 
@@ -76,16 +76,16 @@ msgstr ""
 msgid "Visible to nearby devices"
 msgstr ""
 
-#: src/shell/main.cpp:201 src/shell/qml/Main.qml:239
+#: src/shell/main.cpp:201 src/shell/qml/Main.qml:247
 #: src/shell/qml/SettingsPage.qml:13 src/shell/qml/ShortcutsDialog.qml:13
 msgid "Preferences"
 msgstr ""
 
-#: src/shell/main.cpp:204 src/shell/qml/Main.qml:253
+#: src/shell/main.cpp:204 src/shell/qml/Main.qml:261
 msgid "Quit"
 msgstr ""
 
-#: src/shell/qml/AboutDialog.qml:74 src/shell/qml/Main.qml:267
+#: src/shell/qml/AboutDialog.qml:74 src/shell/qml/Main.qml:275
 msgid "About"
 msgstr ""
 
@@ -154,7 +154,7 @@ msgstr ""
 msgid "Kirigami, notifications, jobs and the other KDE libraries"
 msgstr ""
 
-#: src/shell/qml/HelpPage.qml:12 src/shell/qml/Main.qml:260
+#: src/shell/qml/HelpPage.qml:12 src/shell/qml/Main.qml:268
 #: src/shell/qml/ShortcutsDialog.qml:14 src/shell/qml/ShortcutsDialog.qml:15
 msgid "Help"
 msgstr ""
@@ -163,7 +163,7 @@ msgstr ""
 msgid "Getting started"
 msgstr ""
 
-#: src/shell/qml/HelpPage.qml:31 src/shell/qml/Main.qml:198
+#: src/shell/qml/HelpPage.qml:31 src/shell/qml/Main.qml:206
 #: src/shell/qml/SendPage.qml:36 src/shell/qml/ShortcutsDialog.qml:11
 msgid "Send"
 msgstr ""
@@ -263,34 +263,34 @@ msgstr ""
 msgid "KuickShare"
 msgstr ""
 
-#: src/shell/qml/Main.qml:97
+#: src/shell/qml/Main.qml:105
 msgid "Quit KuickShare?"
 msgstr ""
 
-#: src/shell/qml/Main.qml:98
+#: src/shell/qml/Main.qml:106
 msgid "A transfer is in progress. Quitting stops it."
 msgstr ""
 
-#: src/shell/qml/Main.qml:205 src/shell/qml/ShortcutsDialog.qml:12
+#: src/shell/qml/Main.qml:213 src/shell/qml/ShortcutsDialog.qml:12
 #: src/shell/qml/TransfersPage.qml:11
 msgid "Transfers"
 msgstr ""
 
-#: src/shell/qml/Main.qml:223
+#: src/shell/qml/Main.qml:231
 msgid "More"
 msgstr ""
 
-#: src/shell/qml/Main.qml:246 src/shell/qml/ShortcutsDialog.qml:40
+#: src/shell/qml/Main.qml:254 src/shell/qml/ShortcutsDialog.qml:40
 msgid "Shortcuts"
 msgstr ""
 
-#: src/shell/qml/Main.qml:390
+#: src/shell/qml/Main.qml:398
 msgid ""
 "The sharing service is not running. Nothing can be sent or received until it "
 "is started."
 msgstr ""
 
-#: src/shell/qml/Main.qml:393
+#: src/shell/qml/Main.qml:401
 msgid "Start service"
 msgstr ""
 
@@ -397,7 +397,7 @@ msgstr ""
 msgid "Paste from clipboard"
 msgstr ""
 
-#: src/shell/qml/SendPage.qml:284 src/shell/qml/TransfersPage.qml:281
+#: src/shell/qml/SendPage.qml:284 src/shell/qml/TransfersPage.qml:284
 #: src/shell/transferwatcher.cpp:51 src/shell/transferwatcher.cpp:135
 msgid "%1 file"
 msgid_plural "%1 files"
@@ -766,134 +766,139 @@ msgstr ""
 msgid "Size"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:257
-msgid "Waiting for your approval"
+#: src/shell/qml/TransfersPage.qml:258 src/shell/transferwatcher.cpp:52
+msgid "Looking for the device…"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:259
-msgid "Receiving…"
-msgstr ""
-
-#: src/shell/qml/TransfersPage.qml:261 src/shell/transferwatcher.cpp:106
-msgid "Waiting for the other device to accept"
-msgstr ""
-
-#: src/shell/qml/TransfersPage.qml:261 src/shell/qml/TransfersPage.qml:275
-#: src/shell/transferwatcher.cpp:52 src/shell/transferwatcher.cpp:106
+#: src/shell/qml/TransfersPage.qml:258 src/shell/qml/TransfersPage.qml:264
+#: src/shell/qml/TransfersPage.qml:278 src/shell/transferwatcher.cpp:52
+#: src/shell/transferwatcher.cpp:106
 msgid "Connecting…"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:264 src/shell/transferwatcher.cpp:122
+#: src/shell/qml/TransfersPage.qml:260
+msgid "Waiting for your approval"
+msgstr ""
+
+#: src/shell/qml/TransfersPage.qml:262
+msgid "Receiving…"
+msgstr ""
+
+#: src/shell/qml/TransfersPage.qml:264 src/shell/transferwatcher.cpp:106
+msgid "Waiting for the other device to accept"
+msgstr ""
+
+#: src/shell/qml/TransfersPage.qml:267 src/shell/transferwatcher.cpp:122
 msgid "Switching to Wi-Fi…"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:264
+#: src/shell/qml/TransfersPage.qml:267
 msgid "Sending…"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:266
+#: src/shell/qml/TransfersPage.qml:269
 msgid "Sent"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:266
+#: src/shell/qml/TransfersPage.qml:269
 msgid "Received"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:268
+#: src/shell/qml/TransfersPage.qml:271
 msgid "Cancelled"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:270
+#: src/shell/qml/TransfersPage.qml:273
 msgid "Declined"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:270
+#: src/shell/qml/TransfersPage.qml:273
 msgid "You declined"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:273
+#: src/shell/qml/TransfersPage.qml:276
 msgid "Not accepted"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:273
+#: src/shell/qml/TransfersPage.qml:276
 msgid "Interrupted"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:309
+#: src/shell/qml/TransfersPage.qml:312
 msgid "The history is large (%1) and may slow KuickShare down."
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:312 src/shell/qml/TransfersPage.qml:335
+#: src/shell/qml/TransfersPage.qml:315 src/shell/qml/TransfersPage.qml:338
 msgid "Clear history"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:323
+#: src/shell/qml/TransfersPage.qml:326
 msgid ""
 "History is turned off: new transfers are not saved. You can turn it on in "
 "Preferences."
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:347
+#: src/shell/qml/TransfersPage.qml:350
 msgid "No transfers yet"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:347
+#: src/shell/qml/TransfersPage.qml:350
 msgid "Starting the sharing service…"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:348
+#: src/shell/qml/TransfersPage.qml:351
 msgid ""
 "Sent and received transfers are listed here. Make sure this computer is "
 "visible in Preferences to receive."
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:348
+#: src/shell/qml/TransfersPage.qml:351
 msgid ""
 "Transfers are only listed while the app is open, because the history is "
 "turned off."
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:504
+#: src/shell/qml/TransfersPage.qml:507
 msgid "Unknown device"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:529
+#: src/shell/qml/TransfersPage.qml:532
 msgid "Trusted"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:538
+#: src/shell/qml/TransfersPage.qml:541
 msgid "%1%"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:545
+#: src/shell/qml/TransfersPage.qml:548
 msgid "Cancel"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:552
+#: src/shell/qml/TransfersPage.qml:555
 msgid "Remove from list"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:562
+#: src/shell/qml/TransfersPage.qml:565
 msgid "Wants to share with you · PIN %1"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:571
+#: src/shell/qml/TransfersPage.qml:574
 msgid "More details"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:609 src/shell/transferwatcher.cpp:201
+#: src/shell/qml/TransfersPage.qml:612 src/shell/transferwatcher.cpp:201
 msgid "Accept"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:615 src/shell/transferwatcher.cpp:216
+#: src/shell/qml/TransfersPage.qml:618 src/shell/transferwatcher.cpp:216
 msgid "Decline"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:621 src/shell/transferwatcher.cpp:249
+#: src/shell/qml/TransfersPage.qml:624 src/shell/transferwatcher.cpp:249
 msgid "Open folder"
 msgstr ""
 
-#: src/shell/qml/TransfersPage.qml:627 src/shell/transferwatcher.cpp:233
+#: src/shell/qml/TransfersPage.qml:630 src/shell/transferwatcher.cpp:233
 msgid "Copy"
 msgstr ""
 
@@ -919,10 +924,6 @@ msgstr ""
 
 #: src/shell/transferjob.cpp:67
 msgid "The transfer was interrupted"
-msgstr ""
-
-#: src/shell/transferwatcher.cpp:52
-msgid "Looking for the device…"
 msgstr ""
 
 #: src/shell/transferwatcher.cpp:173
