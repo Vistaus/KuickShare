@@ -7,7 +7,7 @@ KuickShare targets KDE Plasma 6: the AppImage and the Flatpak any distribution, 
 | Path | Content |
 |---|---|
 | `Cargo.toml`, `Cargo.lock` | Rust project (root) |
-| `src/core/` | Daemon `kuickshared`: Quick Share protocol ([`rqs_lib`](https://github.com/nozwock/rquickshare), pinned rev), settings, D-Bus API. Its unit tests sit next to the code |
+| `src/core/` | Daemon `kuickshared`: Quick Share protocol (uses [`third_party/rqs_lib`](THIRD_PARTY.md#changes-to-rqs_lib), a modified copy of rquickshare), settings, D-Bus API. Its unit tests sit next to the code |
 | `src/shell/` | C++ and QML app `kuickshare` (Qt 6, KF6, Kirigami), with its CMake project |
 | `tests/core/` | Rust integration tests; they start the daemon on a private D-Bus |
 | `tests/shell/` | Qt tests: transfer model, Dolphin menu entry, `Exec` quoting, Flatpak and AppImage launcher paths, first-launch integration |
@@ -24,8 +24,8 @@ Dependencies live in a podman image defined by [`build/Containerfile`](build/Con
 ```sh
 build/build-env.sh cargo build
 build/build-env.sh sh -c 'cmake -S src/shell -B dist/tmp/cmake-dev -G Ninja && cmake --build dist/tmp/cmake-dev'
-build/build-appimage.sh    # dist/KuickShare-<version>-x86_64.AppImage and .zsync (Fedora and Arch images; first run is long)
-build/appimage/test-appimage.sh dist/KuickShare-<version>-x86_64.AppImage
+build/build-appimage.sh    # dist/KuickShare-x86_64.AppImage and .zsync (Fedora and Arch images; first run is long)
+build/appimage/test-appimage.sh dist/KuickShare-x86_64.AppImage
 build/build-tarball.sh && build/test-tarball.sh dist/KuickShare-<version>-x86_64.tar.gz
 build/flatpak/build-flatpak.sh && build/flatpak/test-flatpak.sh dist/KuickShare-<version>.flatpak
 ```
@@ -57,12 +57,22 @@ CI runs these on every push and pull request, in a `fedora:44` container ([`ci.y
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features                              # unit tests and tests/core; needs dbus-daemon
+cargo test -p rqs_lib                                  # the vendored library: not a workspace member, so not in the line above
 cmake -S src/shell -B dist/tmp/cmake-dev -G Ninja && cmake --build dist/tmp/cmake-dev
 ctest --test-dir dist/tmp/cmake-dev
 qmllint-qt6 -I /usr/lib64/qt6/qml src/shell/qml/*.qml
 ```
 
 Outside the build container, prefix the commands with `build/build-env.sh`; `dbus-daemon` is in the image.
+
+### Hand tests with a phone (Wi-Fi upgrade and Bluetooth)
+
+The feature needs a real adapter and phone and cannot run in CI. Build with `build/build-env.sh cargo build` and the GUI as above, then run the programs on the host:
+
+- Receiving needs the `dnsmasq` package on the host: NetworkManager runs it to give the phone an address on the hotspot. Neither direction needs privileges.
+- Write the daemon log to a file: `RUST_LOG=info,rqs_lib::hdl::ble_receiver=debug,rqs_lib::upgrade=debug target/debug/kuickshared > kuickshared.log 2>&1` (it logs to stdout), and capture Bluetooth with `sudo btmon -w capture.btsnoop`.
+- The phone's side is in `adb logcat -s NearbyConnections NearbyMediums NearbySharing WifiP2pService` (USB debugging on).
+- Individual steps have `#[ignore]` tests: run `cargo test -p rqs_lib --no-run` (inside the container; the printed path is the test binary) and execute it on the host with `--ignored --nocapture <name>` (`probe_nearby_phones`, `send_small_file_to_phone`, `observe_upgrade_offer`, `send_through_rqs_api`, `gatt_connection_confirm`). `KS_ENDPOINT` picks the phone; `KS_TRANSPORT=gatt` makes `send_small_file_to_phone` use GATT instead of L2CAP. Quick Share must show the Receive screen on the phone, and a Samsung phone may advertise only in short bursts.
 
 ## Code style
 

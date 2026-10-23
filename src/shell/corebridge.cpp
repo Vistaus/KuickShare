@@ -249,16 +249,19 @@ void CoreBridge::onServiceUnregistered()
     emit connectedChanged();
 }
 
-void CoreBridge::callAsync(const QDBusMessage &message, const std::function<void()> &onSuccess)
+void CoreBridge::callAsync(const QDBusMessage &message, const std::function<void()> &onSuccess, const std::function<void()> &onError)
 {
     auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(message), this);
-    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, onSuccess](QDBusPendingCallWatcher *w)
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, onSuccess, onError](QDBusPendingCallWatcher *w)
             {
         w->deleteLater();
         const QDBusPendingReply<> reply = *w;
         if (reply.isError()) {
             emit errorOccurred(reply.error().message());
             refreshProperties(); // drop any optimistic value the UI is showing
+            if (onError) {
+                onError();
+            }
         } else if (onSuccess) {
             onSuccess();
         } });
@@ -303,6 +306,9 @@ void CoreBridge::refreshProperties()
         const bool trusted = props.value(QStringLiteral("TrustedDevicesEnabled"), m_trustedDevicesEnabled).toBool();
         const bool trustedChanged = trusted != m_trustedDevicesEnabled;
         m_trustedDevicesEnabled = trusted;
+        const bool wifiUpgrade = props.value(QStringLiteral("WifiUpgrade"), m_wifiUpgrade).toBool();
+        const bool wifiChanged = wifiUpgrade != m_wifiUpgrade;
+        m_wifiUpgrade = wifiUpgrade;
         const bool trayChanged = tray != m_trayIcon;
         const bool dolphinChanged = dolphin != m_dolphinIntegration;
         m_trayIcon = tray;
@@ -335,6 +341,9 @@ void CoreBridge::refreshProperties()
         }
         if (dolphinChanged) {
             emit dolphinIntegrationChanged();
+        }
+        if (wifiChanged) {
+            emit wifiUpgradeChanged();
         }
         if (keepChanged) {
             emit historyKeepDaysChanged();
@@ -471,6 +480,31 @@ void CoreBridge::setTrustedDevicesEnabled(bool enabled)
     setRemoteProperty(QStringLiteral("TrustedDevicesEnabled"), enabled);
 }
 
+void CoreBridge::setWifiUpgrade(bool enabled)
+{
+    if (enabled == m_wifiUpgrade) {
+        return;
+    }
+    m_wifiUpgrade = enabled;
+    emit wifiUpgradeChanged();
+    setRemoteProperty(QStringLiteral("WifiUpgrade"), enabled);
+}
+
+void CoreBridge::requestWifiUpgrade()
+{
+    auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::sessionBus().asyncCall(methodCall(iface, QStringLiteral("FirewallManaged"))), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this](QDBusPendingCallWatcher *w)
+            {
+        w->deleteLater();
+        const QDBusPendingReply<bool> reply = *w;
+        // A core that cannot answer is not a reason to refuse the setting.
+        if (reply.isError() || reply.value()) {
+            setWifiUpgrade(true);
+        } else {
+            emit firewallWarning();
+        } });
+}
+
 void CoreBridge::setDolphinIntegration(bool enabled)
 {
     if (enabled == m_dolphinIntegration) {
@@ -485,6 +519,29 @@ void CoreBridge::setDolphinIntegration(bool enabled)
     setRemoteProperty(QStringLiteral("DolphinIntegration"), enabled);
 }
 
+bool CoreBridge::appImage() const
+{
+    return Launcher::inAppImage();
+}
+
+bool CoreBridge::menuEntry() const
+{
+    return Integration::menuEntryExists();
+}
+
+void CoreBridge::setMenuEntry(bool enabled)
+{
+    if (enabled == menuEntry()) {
+        return;
+    }
+    if (!(enabled ? Integration::installMenuEntry() : Integration::removeMenuEntry())) {
+        emit errorOccurred(i18n("Could not update the application menu"));
+    } else {
+        Integration::markAsked();
+    }
+    emit menuEntryChanged();
+}
+
 void CoreBridge::integrateAppImage()
 {
     if (!Integration::installMenuEntry() || !DolphinMenu::setEnabled(true)) {
@@ -493,6 +550,7 @@ void CoreBridge::integrateAppImage()
         return;
     }
     Integration::markAsked();
+    emit menuEntryChanged();
     // The Dolphin entry now exists whatever the setting was, so the setting must say on.
     m_dolphinIntegration = true;
     emit dolphinIntegrationChanged();
@@ -649,6 +707,11 @@ void CoreBridge::startDiscovery()
     }
 }
 
+void CoreBridge::scanBluetooth()
+{
+    call(QStringLiteral("ScanBluetooth"), {});
+}
+
 void CoreBridge::stopDiscovery()
 {
     m_discoveryStopTimer.start();
@@ -664,7 +727,34 @@ void CoreBridge::stopDiscoveryNow()
 void CoreBridge::sendFiles(const QString &deviceId, const QStringList &paths)
 {
     m_outgoingFileCounts.insert(deviceId, paths.size());
-    call(QStringLiteral("SendFiles"), {deviceId, paths});
+    const quint64 sendNo = ++m_sendNo[deviceId];
+    emit sendRequested(deviceId, m_devices.nameOf(deviceId), paths.size());
+    // Show the row now: finding the device and connecting can take several seconds before the
+    // core reports anything. The first TransferUpdated for this id takes it over.
+    m_transfers.update(deviceId,
+                       {{QStringLiteral("kind"), QStringLiteral("outbound")},
+                        {QStringLiteral("state"), QStringLiteral("Starting")},
+                        {QStringLiteral("device"), m_devices.nameOf(deviceId)},
+                        {QStringLiteral("files"), paths.join(QLatin1Char('\n'))}});
+    auto msg = methodCall(iface, QStringLiteral("SendFiles"));
+    msg.setArguments({deviceId, paths});
+    callAsync(msg, {}, [this, deviceId, sendNo]
+              {
+                  failIfStarting(deviceId, sendNo);
+                  emit sendRefused(deviceId);
+              });
+    // The core's own watchdog covers Bluetooth sends only: do not leave a row at "Connecting…" for good.
+    QTimer::singleShot(45'000, this, [this, deviceId, sendNo]
+                       { failIfStarting(deviceId, sendNo); });
+}
+
+void CoreBridge::failIfStarting(const QString &deviceId, quint64 sendNo)
+{
+    const bool current = m_sendNo.value(deviceId) == sendNo;
+    if (current && m_transfers.info(deviceId).value(QStringLiteral("state")).toString() == QLatin1String("Starting"))
+    {
+        m_transfers.update(deviceId, {{QStringLiteral("state"), QStringLiteral("Disconnected")}});
+    }
 }
 
 void CoreBridge::sendText(const QString &deviceId, const QString &text, bool isUrl)
@@ -740,11 +830,16 @@ void CoreBridge::onTransferUpdated(const QString &id, const QVariantMap &receive
 
 void CoreBridge::onDeviceFound(const QString &id, const QVariantMap &info)
 {
+    const QString medium = info.value(QStringLiteral("medium"), QStringLiteral("lan")).toString();
+    const QString address = medium == QLatin1String("ble")
+                                ? QString()
+                                : QStringLiteral("%1:%2").arg(info.value(QStringLiteral("ip")).toString(), info.value(QStringLiteral("port")).toString());
     m_devices.upsert(id,
                      plain(info.value(QStringLiteral("name")).toString()),
                      info.value(QStringLiteral("device_type")).toString(),
-                     QStringLiteral("%1:%2").arg(info.value(QStringLiteral("ip")).toString(), info.value(QStringLiteral("port")).toString()),
-                     info.value(QStringLiteral("trust")).toString());
+                     address,
+                     info.value(QStringLiteral("trust")).toString(),
+                     medium);
 }
 
 void CoreBridge::onDeviceLost(const QString &id)

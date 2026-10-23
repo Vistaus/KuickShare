@@ -7,7 +7,7 @@ KuickShare has two programs. `kuickshare` is the window, tray icon and notificat
 ## Requirements
 
 - KDE Plasma 6. The AppImage and the Flatpak bring their own libraries (the Flatpak needs Flatpak and [Flathub](https://flathub.org/setup)). The tarball uses the system's Qt 6 and KDE Frameworks 6: on Fedora, `kf6-kirigami`, `kf6-kirigami-addons` and `qt6-qtdeclarative`. The installer checks for them and prints the `dnf install` (or `pacman`) line if one is missing.
-- The computer and the phone on the same Wi-Fi network. Bluetooth is used to find devices, never to move data. Wi-Fi Direct is not supported.
+- The computer and the phone on the same Wi-Fi network. Bluetooth is used to find devices, never to move data. Without a shared network, see the experimental [Wi-Fi upgrade](wifi-direct.md).
 - A Google account is not needed and cannot be used.
 
 ## Installing, updating and uninstalling
@@ -41,20 +41,20 @@ Both entries start the app through `flatpak run`. The app finds the host folders
 
 ### AppImage
 
-A normal, self-contained AppImage: it brings its own libraries and runs on any distribution, including NixOS and musl ones. Running it starts KuickShare and installs nothing.
+A normal, self-contained AppImage: it brings its own libraries and runs on any distribution, including NixOS and musl ones. Running it starts KuickShare and installs nothing. The latest release is always at `https://github.com/the-beper/KuickShare/releases/latest/download/KuickShare-x86_64.AppImage`.
 
 ```sh
-chmod +x KuickShare-<version>-x86_64.AppImage
-./KuickShare-<version>-x86_64.AppImage
+chmod +x KuickShare-x86_64.AppImage
+./KuickShare-x86_64.AppImage
 ```
 
 It can be managed with the usual tools ([Gear Lever](https://github.com/mijorus/gearlever), [AM / AppMan](https://github.com/ivan-hc/AM), [soar](https://github.com/pkgforge/soar)) and updates with `appimageupdatetool` or any updater that reads its embedded update information (zsync, GitHub releases).
 
-On the first start it asks once whether to add KuickShare to the application menu and Dolphin's context menu. "Add" writes the menu entry and the Dolphin entry, both pointing at the AppImage file (if you move the file, turn the Dolphin entry off and on again in Preferences); "Not now" turns the Dolphin entry off in Preferences. Nothing is asked if an installation or those entries already exist, or if the app starts with `--background`. The answer is remembered in `~/.config/kuickshare/integration-asked`; to remove the menu entry delete `~/.local/share/applications/io.github.the_beper.KuickShare.desktop` and the icons it installed.
+On the first start it asks once whether to add KuickShare to the application menu and Dolphin's context menu. "Add" writes the menu entry and the Dolphin entry, both pointing at the AppImage file (if you move the file, turn the Dolphin entry off and on again in Preferences); "Not now" turns the Dolphin entry off in Preferences. The Preferences have an "Application menu entry" switch (AppImage only) that adds or removes the menu entry at any time, so it also works where the question is not asked. Nothing is asked if an installation or those entries already exist, if the app starts with `--background`, or if `XDG_CURRENT_DESKTOP` is not set (a bare session such as Xvfb). The answer is remembered in `~/.config/kuickshare/integration-asked`; to remove the menu entry delete `~/.local/share/applications/io.github.the_beper.KuickShare.desktop` and the icons it installed.
 
 | Command | Effect |
 |---|---|
-| `KuickShare.AppImage [file...]` | Start the app; the files are queued on the Send page |
+| `KuickShare-x86_64.AppImage [file...]` | Start the app; the files are queued on the Send page |
 
 To install KuickShare into `~/.local` with the system's libraries instead, use the tarball (below).
 
@@ -169,6 +169,25 @@ A sender can propose file names that would write outside the download folder. Ku
 
 Sending to the phone produces the same notifications in the other direction. If the phone declines before any data moved, you see "Transfer not accepted"; a lost connection gives "Transfer interrupted".
 
+## Without a shared network (experimental)
+
+With **Settings → Wi-Fi hotspot → Receive without a shared network** on, a phone whose Wi-Fi is off or on another network can send to this computer, and this computer can send to it. The transfer starts over Bluetooth and moves to a temporary Wi-Fi link. It is off by default.
+
+| | Receiving | Sending |
+|---|---|---|
+| Phone | Quick Share open on the share sheet | Quick Share's receive screen open, visibility **Everyone** |
+| Computer | Visible; the setting on | The phone appears with a Bluetooth icon on the Send page. The refresh button next to "Send to" scans again (a scan lasts about 15 s and is never continuous) |
+| Wi-Fi link | This computer starts a hotspot | The phone starts a Wi-Fi Direct group and this computer joins it |
+| Needs | The `dnsmasq` package: NetworkManager runs it to give the phone an address | Nothing extra |
+
+- Needs NetworkManager and Bluetooth, no privileges. With firewalld the computer opens only the port of the transfer. Without it (ufw, nftables or none) the Wi-Fi hotspot is put in a zone that lets the phone reach every service of the computer, so turning the setting on asks you to confirm. A computer with one radio can lose its Wi-Fi connection while the link is up.
+- While the setting is on, this computer is visible over Bluetooth, under its device name, to devices in range. Nothing is sent without your consent.
+- "Accept and trust" is not offered for Bluetooth transfers, and a PIN is shown for each one: compare it with the phone.
+- When the last network connection drops (for example the Wi-Fi is turned off), the devices found over the network disappear from the Send page at once and a Bluetooth scan starts, so a phone that is still in range shows up with the Bluetooth icon after a few seconds. When a network comes back, the search for devices starts over at once, so a phone on it is found without waiting for the periodic check (up to about 30 s). This needs NetworkManager and the setting on.
+- A phone on the same network as the computer is reached over the network and never takes part in the upgrade; it is listed once, even if Bluetooth sees it too.
+- Plasma shows "Connection 'kuickshare-ap' activated" for the temporary link. It cannot be hidden per connection, only for all networks in System Settings → Notifications → Network Management.
+- When you press a device on the Send page, the Transfers page gets its row and a job appears in Plasma's job tracker at once; the job names the step: "Looking for the device…", "Connecting…", "Waiting for the other device to accept", then "Switching to Wi-Fi…" until data moves. It can be cancelled only from the last step on. When it finishes, the Send page is left empty; after a failure the files and text stay for a new attempt.
+
 ## Transfers page and history
 
 ![The Transfers page](screenshots/transfers.png)
@@ -236,6 +255,7 @@ Open it with `Ctrl+,`, from the menu, or from the tray. Changes apply at once an
 | Startup | Start at login | Off | Writes the autostart entry; the app starts hidden. The entry points at the running binary, so switch it off and on again after moving the installation |
 | Integration | Show tray icon | On | Without it, closing the window quits the app and nothing can be received until you open it again. At login it still starts hidden, so start KuickShare again to see the window |
 | Integration | Dolphin context menu | On | Adds or removes **Send with KuickShare** |
+| Wi-Fi hotspot | Receive without a shared network | Off | Experimental; see [Without a shared network](#without-a-shared-network-experimental) |
 | Reset | Reset preferences... | | Restores every setting to its default, including autostart off and the Dolphin entry on. History, paired and trusted devices are kept |
 
 ## Do Not Disturb

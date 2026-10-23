@@ -12,8 +12,26 @@ TransferJob::TransferJob(const QString &id, bool outbound, const QString &device
 
 void TransferJob::start()
 {
+    emitDescription();
+}
+
+void TransferJob::setStatus(const QString &status, bool cancellable)
+{
+    const bool killable = status.isEmpty() || cancellable;
+    if (m_status == status && (capabilities() == KJob::Killable) == killable)
+    {
+        return;
+    }
+    m_status = status;
+    setCapabilities(killable ? KJob::Killable : KJob::NoCapabilities);
+    emitDescription();
+}
+
+void TransferJob::emitDescription()
+{
     Q_EMIT description(this,
-                       m_outbound ? i18n("Sending files") : i18n("Receiving files"),
+                       !m_status.isEmpty() ? m_status : m_outbound ? i18n("Sending files")
+                                                                  : i18n("Receiving files"),
                        qMakePair(m_outbound ? i18n("To") : i18n("From"), m_device),
                        m_summary.isEmpty() ? QPair<QString, QString>() : qMakePair(i18n("Files"), m_summary));
 }

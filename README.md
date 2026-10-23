@@ -60,7 +60,7 @@ Three packages, all for KDE Plasma 6:
 | Package | For | How |
 |---|---|---|
 | Flatpak | Any distribution | Add the repository and install (below); updates arrive through the software center |
-| AppImage | Any distribution | Download it from the [releases](https://github.com/the-beper/KuickShare/releases), make it executable and run it. It brings its own libraries and installs nothing; use it with an AppImage manager such as [Gear Lever](https://github.com/mijorus/gearlever), [AM / AppMan](https://github.com/ivan-hc/AM) or [soar](https://github.com/pkgforge/soar) |
+| AppImage | Any distribution | Download [`KuickShare-x86_64.AppImage`](https://github.com/the-beper/KuickShare/releases/latest/download/KuickShare-x86_64.AppImage) (stable link to the latest release), make it executable and run it. It brings its own libraries and installs nothing; use it with an AppImage manager such as [Gear Lever](https://github.com/mijorus/gearlever), [AM / AppMan](https://github.com/ivan-hc/AM) or [soar](https://github.com/pkgforge/soar) |
 | Tarball | Fedora and distributions with Qt 6 and KDE Frameworks 6 | Download `KuickShare-<version>-x86_64.tar.gz`, extract it and run `install.sh`: it installs into `~/.local` and uses the system libraries |
 
 ```sh
@@ -76,7 +76,7 @@ Update, uninstall and requirements are in the [usage guide](docs/usage.md).
 
 - [Usage](docs/usage.md): install, update, uninstall, everyday use, trusted and paired devices.
 - [Architecture](docs/architecture.md): design, security model, packaging.
-- [Wi-Fi upgrade](docs/wifi-direct.md): transfers without a shared network (experimental), how it works, requirements, limits, open work.
+- [Wi-Fi upgrade](docs/wifi-direct.md): transfers without a shared network (experimental), how it works, requirements, limits.
 - [D-Bus API](docs/dbus-api.md): the interface of the background service.
 - [Contributing](CONTRIBUTING.md): build, tests, translations, releases.
 - [Security](SECURITY.md): reporting a vulnerability, known limits.

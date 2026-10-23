@@ -7,7 +7,21 @@ KuickShare is GPL-3.0-or-later (see [LICENSE](LICENSE)). It builds on the projec
 | Project | License | Role |
 | --- | --- | --- |
 | [Packet](https://github.com/nozwock/packet) | GPL-3.0-or-later | KuickShare is derived from it |
-| [rquickshare / `rqs_lib`](https://github.com/nozwock/rquickshare) | GPL-3.0 | Quick Share protocol implementation, used as a Rust dependency (git rev pinned in `Cargo.toml`) |
+| [rquickshare / `rqs_lib`](https://github.com/nozwock/rquickshare) | GPL-3.0 | Quick Share protocol implementation, vendored as a path dependency in [`third_party/rqs_lib`](third_party/rqs_lib) (see below) |
+
+### Changes to `rqs_lib`
+
+`third_party/rqs_lib` is a modified copy of rquickshare `core_lib` at rev `c9ac93f5584a4265e8da679ad689df5be1e80c6b`. Changes against that revision:
+
+| Change | Files |
+| --- | --- |
+| WIFI_HOTSPOT and WIFI_DIRECT bandwidth upgrade in both directions, plain frames when the host disables encryption (new) | `src/upgrade.rs`, `src/upgrade/tests.rs`; handlers in `src/hdl/inbound.rs`, `src/hdl/outbound.rs`; `src/lib.rs` (`set_wifi_link`) |
+| Receive session over a non-TCP stream, cancel-safe length prefix, keep-alive tolerance in the handshake | `src/hdl/migratable.rs` (new), `src/hdl/inbound.rs`, `src/hdl/outbound.rs`, `src/utils.rs`, `src/manager.rs` |
+| Bluetooth receiver (new) | `src/hdl/ble_receiver/`, `src/hdl/mod.rs`, `src/lib.rs` |
+| Bluetooth sender: windowed scan, L2CAP dial and bridge, BLE endpoints in `EndpointInfo` and `SendInfo` (new) | `src/hdl/ble_scan.rs`, `src/hdl/ble_send/`, `src/lib.rs`, `src/manager.rs`, `src/hdl/mdns_discovery.rs` |
+| BLE scanner removed (`src/hdl/ble.rs`, `btleplug`); periodic mDNS re-announce instead | `src/hdl/mdns.rs`, `src/lib.rs`, `Cargo.toml` |
+| Per-chunk logs lowered to `trace` | `src/hdl/inbound.rs`, `src/hdl/outbound.rs` |
+| Formatting only | `src/hdl/mdns_discovery.rs`, `src/hdl/blea.rs` (comment) |
 
 ## System software and bundled libraries
 
@@ -38,14 +52,15 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | --- | --- | --- |
 | anyhow | 1.0.104 | MIT OR Apache-2.0 |
 | dirs | 7.0.0 | MIT OR Apache-2.0 |
+| futures-util | 0.3.34 | MIT OR Apache-2.0 |
 | hex | 0.4.3 | MIT OR Apache-2.0 |
+| rand | 0.9.5 | MIT OR Apache-2.0 |
 | rqs_lib | 0.11.5 | GPL-3.0 (repository LICENSE; the crate has no license field) |
 | serde | 1.0.229 | MIT OR Apache-2.0 |
 | serde_json | 1.0.154 | MIT OR Apache-2.0 |
-| sha2 | 0.10.9 | MIT OR Apache-2.0 |
 | sha2 | 0.11.1 | MIT OR Apache-2.0 |
 | snow | 0.10.0 | Apache-2.0 OR MIT |
-| tokio | 1.53.3 | MIT |
+| tokio | 1.54.0 | MIT |
 | tracing | 0.1.44 | MIT |
 | tracing-subscriber | 0.3.23 | MIT |
 | zbus | 6.0.0 | MIT |
@@ -53,7 +68,7 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 ### Transitive dependencies
 
 <details>
-<summary>261 crates</summary>
+<summary>223 crates</summary>
 
 | Crate | Version | License |
 | --- | --- | --- |
@@ -70,20 +85,14 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | blake2 | 0.10.6 | MIT OR Apache-2.0 |
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 |
 | block-buffer | 0.12.1 | MIT OR Apache-2.0 |
-| block2 | 0.5.1 | MIT |
 | bluer | 0.17.4 | BSD-2-Clause |
-| bluez-async | 0.8.2 | MIT OR Apache-2.0 |
-| bluez-generated | 0.4.0 | MIT OR Apache-2.0 |
-| btleplug | 0.11.8 | MIT/Apache-2.0/BSD-3-Clause |
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 |
 | bytes | 1.12.1 | MIT |
 | c_linked_list | 1.1.1 | MIT OR BSD-3-Clause |
-| cesu8 | 1.1.0 | Apache-2.0/MIT |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 |
 | chacha20 | 0.9.1 | Apache-2.0 OR MIT |
 | chacha20poly1305 | 0.10.1 | Apache-2.0 OR MIT |
 | cipher | 0.4.4 | MIT OR Apache-2.0 |
-| combine | 4.6.9 | MIT |
 | concurrent-queue | 2.5.0 | Apache-2.0 OR MIT |
 | const-oid | 0.10.2 | Apache-2.0 OR MIT |
 | const-oid | 0.9.6 | Apache-2.0 OR MIT |
@@ -102,8 +111,6 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | darling | 0.20.11 | MIT |
 | darling_core | 0.20.11 | MIT |
 | darling_macro | 0.20.11 | MIT |
-| dashmap | 5.5.3 | MIT |
-| dashmap | 6.2.1 | MIT |
 | dbus | 0.9.12 | Apache-2.0/MIT |
 | dbus-crossroads | 0.5.3 | Apache-2.0/MIT |
 | dbus-tokio | 0.7.6 | Apache-2.0/MIT |
@@ -131,17 +138,15 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | futures-macro | 0.3.34 | MIT OR Apache-2.0 |
 | futures-sink | 0.3.34 | MIT OR Apache-2.0 |
 | futures-task | 0.3.34 | MIT OR Apache-2.0 |
-| futures-util | 0.3.34 | MIT OR Apache-2.0 |
 | generic-array | 0.14.7 | MIT |
 | get_if_addrs | 0.5.3 | MIT OR BSD-3-Clause |
 | get_if_addrs-sys | 0.1.1 | MIT OR BSD-3-Clause |
-| getrandom | 0.4.3 | MIT OR Apache-2.0 |
-| getrandom | 0.3.4 | MIT OR Apache-2.0 |
 | getrandom | 0.2.17 | MIT OR Apache-2.0 |
+| getrandom | 0.3.4 | MIT OR Apache-2.0 |
+| getrandom | 0.4.3 | MIT OR Apache-2.0 |
 | ghash | 0.5.1 | Apache-2.0 OR MIT |
 | glob | 0.3.4 | MIT OR Apache-2.0 |
 | group | 0.13.0 | MIT/Apache-2.0 |
-| hashbrown | 0.14.5 | MIT OR Apache-2.0 |
 | heck | 0.5.0 | MIT OR Apache-2.0 |
 | hkdf | 0.12.4 | MIT OR Apache-2.0 |
 | hmac | 0.12.1 | MIT OR Apache-2.0 |
@@ -152,11 +157,6 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | io-kit-sys | 0.3.0 | MIT / Apache-2.0 |
 | itertools | 0.14.0 | MIT OR Apache-2.0 |
 | itoa | 1.0.18 | MIT OR Apache-2.0 |
-| jni | 0.19.0 | MIT/Apache-2.0 |
-| jni-sys | 0.3.1 | MIT OR Apache-2.0 |
-| jni-sys | 0.4.1 | MIT OR Apache-2.0 |
-| jni-sys-macros | 0.4.1 | MIT OR Apache-2.0 |
-| jni-utils | 0.1.1 | BSD-3-Clause |
 | js-sys | 0.3.106 | MIT OR Apache-2.0 |
 | lazy_static | 1.5.1 | MIT OR Apache-2.0 |
 | libaes | 0.7.0 | Apache-2.0 OR MIT |
@@ -170,7 +170,7 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | mach | 0.3.2 | BSD-2-Clause |
 | mach2 | 0.4.3 | BSD-2-Clause OR MIT OR Apache-2.0 |
 | matchers | 0.2.0 | MIT |
-| mdns-sd | 0.10.4 | Apache-2.0 OR MIT (git: rquickshare dependency) |
+| mdns-sd | 0.10.4 | Apache-2.0 OR MIT |
 | memchr | 2.8.3 | Unlicense OR MIT |
 | memoffset | 0.9.1 | MIT |
 | mime | 0.3.17 | MIT OR Apache-2.0 |
@@ -182,17 +182,11 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | num-derive | 0.4.2 | MIT OR Apache-2.0 |
 | num-integer | 0.1.47 | MIT OR Apache-2.0 |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 |
-| objc-sys | 0.3.5 | MIT |
-| objc2 | 0.5.3 | MIT |
-| objc2-core-bluetooth | 0.2.2 | MIT |
-| objc2-encode | 4.1.0 | MIT |
-| objc2-foundation | 0.2.2 | MIT |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 |
 | opaque-debug | 0.3.1 | MIT OR Apache-2.0 |
 | option-ext | 0.2.0 | MPL-2.0 |
 | ordered-stream | 0.2.0 | MIT OR Apache-2.0 |
 | p256 | 0.13.2 | Apache-2.0 OR MIT |
-| parking_lot_core | 0.9.12 | MIT OR Apache-2.0 |
 | pem-rfc7468 | 0.7.0 | Apache-2.0 OR MIT |
 | pin-project | 1.1.13 | Apache-2.0 OR MIT |
 | pin-project-internal | 1.1.13 | Apache-2.0 OR MIT |
@@ -207,13 +201,11 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | prost | 0.13.5 | Apache-2.0 |
 | prost-derive | 0.13.5 | Apache-2.0 |
 | quote | 1.0.47 | MIT OR Apache-2.0 |
-| r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
 | r-efi | 5.3.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
-| rand | 0.9.5 | MIT OR Apache-2.0 |
+| r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
 | rand_chacha | 0.9.0 | MIT OR Apache-2.0 |
-| rand_core | 0.9.5 | MIT OR Apache-2.0 |
 | rand_core | 0.6.4 | MIT OR Apache-2.0 |
-| redox_syscall | 0.5.18 | MIT |
+| rand_core | 0.9.5 | MIT OR Apache-2.0 |
 | redox_users | 0.5.3 | MIT |
 | regex-automata | 0.4.18 | MIT OR Apache-2.0 |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 |
@@ -223,10 +215,10 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | rustversion | 1.0.23 | MIT OR Apache-2.0 |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 |
 | sec1 | 0.7.3 | Apache-2.0 OR MIT |
-| serde-xml-rs | 0.8.2 | MIT |
 | serde_core | 1.0.229 | MIT OR Apache-2.0 |
 | serde_derive | 1.0.229 | MIT OR Apache-2.0 |
 | serde_repr | 0.1.21 | MIT OR Apache-2.0 |
+| sha2 | 0.10.9 | MIT OR Apache-2.0 |
 | sharded-slab | 0.1.7 | MIT |
 | signal-hook-registry | 1.4.8 | MIT OR Apache-2.0 |
 | signature | 2.2.0 | Apache-2.0 OR MIT |
@@ -236,19 +228,16 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | socket2 | 0.6.5 | MIT OR Apache-2.0 |
 | spin | 0.9.9 | MIT |
 | spki | 0.7.3 | Apache-2.0 OR MIT |
-| static_assertions | 1.1.0 | MIT OR Apache-2.0 |
 | strsim | 0.11.1 | MIT |
 | strum | 0.26.3 | MIT |
 | strum_macros | 0.26.4 | MIT |
 | subtle | 2.6.1 | BSD-3-Clause |
-| syn | 3.0.9 | MIT OR Apache-2.0 |
 | syn | 2.0.119 | MIT OR Apache-2.0 |
+| syn | 3.0.9 | MIT OR Apache-2.0 |
 | synstructure | 0.13.2 | MIT |
-| sys_metrics | 0.2.7 | AGPL-3.0 (git: rquickshare dependency) |
+| sys_metrics | 0.2.7 | AGPL-3.0 |
 | tempfile | 3.27.0 | MIT OR Apache-2.0 |
 | thiserror | 2.0.21 | MIT OR Apache-2.0 |
-| thiserror | 1.0.69 | MIT OR Apache-2.0 |
-| thiserror-impl | 1.0.69 | MIT OR Apache-2.0 |
 | thiserror-impl | 2.0.21 | MIT OR Apache-2.0 |
 | thread_local | 1.1.10 | MIT OR Apache-2.0 |
 | tokio-macros | 2.7.2 | MIT |
@@ -271,45 +260,33 @@ The list is generated from `cargo metadata` (`Cargo.lock`), restricted to normal
 | wasm-bindgen-macro | 0.2.129 | MIT OR Apache-2.0 |
 | wasm-bindgen-macro-support | 0.2.129 | MIT OR Apache-2.0 |
 | wasm-bindgen-shared | 0.2.129 | MIT OR Apache-2.0 |
-| winapi | 0.3.9 | MIT/Apache-2.0 |
 | winapi | 0.2.8 | MIT |
+| winapi | 0.3.9 | MIT/Apache-2.0 |
 | winapi-i686-pc-windows-gnu | 0.4.0 | MIT/Apache-2.0 |
 | winapi-x86_64-pc-windows-gnu | 0.4.0 | MIT/Apache-2.0 |
-| windows | 0.61.3 | MIT OR Apache-2.0 |
-| windows-collections | 0.2.0 | MIT OR Apache-2.0 |
-| windows-core | 0.61.2 | MIT OR Apache-2.0 |
-| windows-future | 0.2.1 | MIT OR Apache-2.0 |
-| windows-implement | 0.60.2 | MIT OR Apache-2.0 |
-| windows-interface | 0.59.3 | MIT OR Apache-2.0 |
 | windows-link | 0.2.1 | MIT OR Apache-2.0 |
-| windows-link | 0.1.3 | MIT OR Apache-2.0 |
-| windows-numerics | 0.2.0 | MIT OR Apache-2.0 |
-| windows-result | 0.3.4 | MIT OR Apache-2.0 |
-| windows-strings | 0.4.2 | MIT OR Apache-2.0 |
-| windows-sys | 0.52.0 | MIT OR Apache-2.0 |
 | windows-sys | 0.48.0 | MIT OR Apache-2.0 |
+| windows-sys | 0.52.0 | MIT OR Apache-2.0 |
 | windows-sys | 0.61.2 | MIT OR Apache-2.0 |
 | windows-targets | 0.48.5 | MIT OR Apache-2.0 |
 | windows-targets | 0.52.6 | MIT OR Apache-2.0 |
-| windows-threading | 0.1.0 | MIT OR Apache-2.0 |
-| windows_aarch64_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
 | windows_aarch64_gnullvm | 0.48.5 | MIT OR Apache-2.0 |
+| windows_aarch64_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
 | windows_aarch64_msvc | 0.48.5 | MIT OR Apache-2.0 |
 | windows_aarch64_msvc | 0.52.6 | MIT OR Apache-2.0 |
-| windows_i686_gnu | 0.52.6 | MIT OR Apache-2.0 |
 | windows_i686_gnu | 0.48.5 | MIT OR Apache-2.0 |
+| windows_i686_gnu | 0.52.6 | MIT OR Apache-2.0 |
 | windows_i686_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
-| windows_i686_msvc | 0.52.6 | MIT OR Apache-2.0 |
 | windows_i686_msvc | 0.48.5 | MIT OR Apache-2.0 |
-| windows_x86_64_gnu | 0.52.6 | MIT OR Apache-2.0 |
+| windows_i686_msvc | 0.52.6 | MIT OR Apache-2.0 |
 | windows_x86_64_gnu | 0.48.5 | MIT OR Apache-2.0 |
-| windows_x86_64_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
+| windows_x86_64_gnu | 0.52.6 | MIT OR Apache-2.0 |
 | windows_x86_64_gnullvm | 0.48.5 | MIT OR Apache-2.0 |
-| windows_x86_64_msvc | 0.52.6 | MIT OR Apache-2.0 |
+| windows_x86_64_gnullvm | 0.52.6 | MIT OR Apache-2.0 |
 | windows_x86_64_msvc | 0.48.5 | MIT OR Apache-2.0 |
+| windows_x86_64_msvc | 0.52.6 | MIT OR Apache-2.0 |
 | winnow | 1.0.4 | MIT |
 | wit-bindgen | 0.57.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
-| xml | 1.4.0 | MIT |
 | zbus_macros | 6.0.0 | MIT |
 | zbus_utils | 6.0.0 | MIT |
 | zcheapstr | 1.1.0 | MIT |

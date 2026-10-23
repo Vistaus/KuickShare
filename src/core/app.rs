@@ -14,7 +14,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use rqs_lib::{
-    EndpointInfo, OutboundPayload, RQS, SendInfo, TextPayloadType, Visibility,
+    BleTarget, EndpointInfo, OutboundPayload, RQS, SendInfo, TextPayloadType, Visibility, WifiLink,
     channel::{ChannelMessage, Message, TransferAction},
 };
 use tokio::{
@@ -27,11 +27,12 @@ use crate::{
     allowed::{self, Allowed, AllowedDevice},
     dbus::{self, TransferEvent},
     history::{self, History},
+    link::{NetworkEvent, NmLink},
     settings::{self, Settings},
     trust::{self, Trust, TrustEvent},
 };
 
-/// Nearby devices found by discovery, keyed by endpoint id (`ip:port`).
+/// Nearby devices found by discovery, keyed by endpoint id (`ip:port`, or `ble:<id>` over Bluetooth).
 pub type Endpoints = Arc<StdMutex<HashMap<String, EndpointInfo>>>;
 /// IPs of nearby computers that run KuickShare and are paired with this one.
 pub type TrustedIps = Arc<StdMutex<HashSet<String>>>;
@@ -111,12 +112,18 @@ impl Core {
             tracing::warn!("trusted devices unavailable: {e:#}");
         }
         self.conn = Some(conn);
+        if self.settings.wifi_upgrade {
+            remove_stale_wifi_profiles().await;
+        }
         self.start_engine(false).await
     }
 
     pub async fn shutdown(&mut self) {
         if let Some(engine) = self.engine.take() {
             engine.stop().await;
+        }
+        if self.settings.wifi_upgrade {
+            remove_stale_wifi_profiles().await;
         }
     }
 
@@ -137,6 +144,9 @@ impl Core {
     }
 
     fn control_addr(&self, endpoint_id: &str) -> Result<SocketAddr> {
+        if BleTarget::parse(endpoint_id).is_some() {
+            bail!("Bluetooth devices cannot be paired");
+        }
         let ip = self
             .endpoints
             .lock()
@@ -161,7 +171,7 @@ impl Core {
         let mac = transfer_id
             .rsplit_once(':')
             .and_then(|(ip, _)| allowed::mac_for_ip(ip))
-            .context("cannot read the MAC address of this device")?;
+            .context("cannot read the MAC address of this device (only devices on the same network can be trusted)")?;
         let device = AllowedDevice { name, mac };
         let mut list = self.allowed.lock().unwrap();
         if !list.contains(&device) {
@@ -244,6 +254,14 @@ impl Core {
     pub fn set_trusted_devices(&mut self, enabled: bool) {
         self.settings.trusted_devices = enabled;
         self.trusted_enabled.store(enabled, Ordering::Relaxed);
+        self.save();
+    }
+
+    pub fn set_wifi_upgrade(&mut self, enabled: bool) {
+        self.settings.wifi_upgrade = enabled;
+        if let Some(engine) = &self.engine {
+            engine.rqs.set_wifi_link(wifi_link(enabled));
+        }
         self.save();
     }
 
@@ -371,6 +389,52 @@ impl Core {
         Ok(())
     }
 
+    /// Runs one more Bluetooth scan window; the devices arrive like the ones of `start_discovery`.
+    pub fn scan_bluetooth(&self) -> Result<()> {
+        let engine = self.engine.as_ref().context("service is not running")?;
+        if !engine.discovery_on {
+            bail!("discovery is not running");
+        }
+        engine.rqs.scan_ble(engine.discovery_tx.clone())
+    }
+
+    /// The last network connection is gone: the devices found over the LAN cannot be reached any
+    /// more, so they are dropped now instead of when their mDNS records expire, and a Bluetooth
+    /// scan looks for the phones that remain.
+    pub async fn network_lost(&mut self) {
+        if !self.settings.wifi_upgrade {
+            return;
+        }
+        let gone = take_lan_endpoints(&mut self.endpoints.lock().unwrap());
+        if let Some(conn) = &self.conn {
+            for id in &gone {
+                dbus::emit_device_lost(conn, id).await;
+            }
+        }
+        if let Err(e) = self.scan_bluetooth() {
+            tracing::debug!("no Bluetooth scan after the network was lost: {e}");
+        }
+    }
+
+    /// A network is up again: the devices of the LAN would be noticed by the mDNS library only
+    /// after up to 30 s, so the search starts over now. The list stays as it is.
+    pub fn network_gained(&mut self) {
+        if !self.settings.wifi_upgrade {
+            return;
+        }
+        let Some(engine) = self.engine.as_mut() else {
+            return;
+        };
+        if !engine.discovery_on {
+            return;
+        }
+        engine.rqs.stop_discovery();
+        if let Err(e) = engine.rqs.discovery(engine.discovery_tx.clone()) {
+            tracing::warn!("could not restart the discovery after the network came back: {e:#}");
+            engine.discovery_on = false;
+        }
+    }
+
     pub fn stop_discovery(&mut self) {
         if let Some(engine) = &mut self.engine
             && engine.discovery_on
@@ -413,6 +477,10 @@ impl Core {
             .get(endpoint_id)
             .cloned()
             .with_context(|| format!("unknown device {endpoint_id}"))?;
+        let ble = endpoint.ble.is_some();
+        if ble && !self.settings.wifi_upgrade {
+            bail!("Sending over Bluetooth needs the Wi-Fi upgrade, which is off (see Settings)");
+        }
         // A paired KuickShare computer accepts the transfer by itself if it is told in advance.
         let trusted = endpoint
             .ip
@@ -425,21 +493,37 @@ impl Core {
                 tracing::info!("could not announce the transfer to the paired computer");
             }
         }
-        let send_info = SendInfo {
-            id: endpoint.id.clone(),
-            name: endpoint.name.clone().unwrap_or_default(),
-            addr: format!(
+        let name = endpoint.name.clone().unwrap_or_default();
+        let addr = if ble {
+            String::new()
+        } else {
+            format!(
                 "{}:{}",
                 endpoint.ip.unwrap_or_default(),
                 endpoint.port.unwrap_or_default()
-            ),
+            )
+        };
+        // The library only logs a failed scan or dial: without any event in time, tell the user.
+        let watch = if let (true, Some(conn)) = (ble, &self.conn) {
+            Some((conn.clone(), engine.rqs.message_sender.subscribe()))
+        } else {
+            None
+        };
+        let send_info = SendInfo {
+            id: endpoint.id.clone(),
+            name: name.clone(),
+            addr,
             ob,
         };
         engine
             .send_tx
             .send(send_info)
             .await
-            .context("service stopped while sending")
+            .context("service stopped while sending")?;
+        if let Some((conn, events)) = watch {
+            tokio::spawn(report_silent_send(conn, events, endpoint.id, name));
+        }
+        Ok(())
     }
 
     fn ensure_idle(&self) -> Result<()> {
@@ -489,6 +573,7 @@ impl Core {
             self.settings.download_dir.clone(),
             Some(self.device_name()),
         );
+        rqs.set_wifi_link(wifi_link(self.settings.wifi_upgrade));
         let (send_tx, _) = rqs
             .run()
             .await
@@ -532,12 +617,94 @@ impl Core {
     }
 }
 
+/// Removes the devices found over the LAN (everything but `ble:` ids) and returns their ids.
+fn take_lan_endpoints(endpoints: &mut HashMap<String, EndpointInfo>) -> Vec<String> {
+    let lan: Vec<String> = endpoints
+        .iter()
+        .filter(|(_, endpoint)| endpoint.ble.is_none())
+        .map(|(id, _)| id.clone())
+        .collect();
+    for id in &lan {
+        endpoints.remove(id);
+    }
+    lan
+}
+
+/// Follows NetworkManager: `Core::network_lost` when the last connection drops and
+/// `Core::network_gained` when one comes back.
+pub async fn watch_network(core: Arc<tokio::sync::Mutex<Core>>) {
+    let (tx, mut events) = mpsc::unbounded_channel();
+    tokio::spawn(crate::link::watch_network(tx));
+    while let Some(event) = events.recv().await {
+        match event {
+            NetworkEvent::Lost => core.lock().await.network_lost().await,
+            NetworkEvent::Gained => core.lock().await.network_gained(),
+        }
+    }
+}
+
+/// A Bluetooth send scans for at most 12 s, then dials (a GATT dial takes up to 15 s) and waits
+/// for the phone's first frame. The library reports a failure itself; this only covers a hang.
+const BLE_START_TIMEOUT: Duration = Duration::from_secs(40);
+
+/// Waits for the first event of the transfer `id`; if none comes in time, the scan or the dial
+/// failed (the library only logs that) and the transfer is reported as failed.
+async fn report_silent_send(
+    conn: Connection,
+    mut events: broadcast::Receiver<ChannelMessage>,
+    id: String,
+    device: String,
+) {
+    if send_started(&mut events, &id, BLE_START_TIMEOUT).await {
+        return;
+    }
+    tracing::info!("no answer from {id}: reporting the Bluetooth send as failed");
+    dbus::emit_failed_transfer(&conn, &id, &device).await;
+}
+
+/// True when the transfer `id` produced an event within `within`, or when the service stopped
+/// (then there is nothing to report).
+async fn send_started(
+    events: &mut broadcast::Receiver<ChannelMessage>,
+    id: &str,
+    within: Duration,
+) -> bool {
+    let started = async {
+        loop {
+            match events.recv().await {
+                Ok(message) if message.id == id => return true,
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => return true,
+            }
+        }
+    };
+    tokio::time::timeout(within, started).await.is_ok()
+}
+
 /// A transfer that has not been heard of for this long is taken to be over (its final event was
 /// lost), so it does not block the settings that restart the service for ever.
 const STALE_AFTER_SECS: i64 = 600;
 
 fn drop_stale(active: &mut HashMap<String, TransferEvent>, now: i64) {
     active.retain(|_, transfer| now - transfer.last_event < STALE_AFTER_SECS);
+}
+
+/// Removes `kuickshare-*` Wi-Fi profiles left by a crash or by the shutdown, only when the Wi-Fi
+/// upgrade is on (it is the only user of NetworkManager). Quiet when NetworkManager is absent;
+/// bounded so it cannot hang the daemon.
+async fn remove_stale_wifi_profiles() {
+    let link = NmLink::new();
+    let sweep = link.cleanup_stale();
+    if tokio::time::timeout(Duration::from_secs(5), sweep)
+        .await
+        .is_err()
+    {
+        tracing::debug!("Wi-Fi profile cleanup timed out");
+    }
+}
+
+fn wifi_link(enabled: bool) -> Option<Arc<dyn WifiLink>> {
+    enabled.then(|| Arc::new(NmLink::new()) as Arc<dyn WifiLink>)
 }
 
 fn visibility(visible: bool) -> Visibility {
@@ -559,6 +726,24 @@ mod tests {
     }
 
     #[test]
+    fn losing_the_network_drops_the_lan_devices_and_keeps_the_bluetooth_ones() {
+        let lan = EndpointInfo {
+            id: "10.0.0.5:4000".into(),
+            ..EndpointInfo::default()
+        };
+        let ble = EndpointInfo {
+            id: "ble:G483".into(),
+            ble: Some(rqs_lib::BleTarget {
+                endpoint_id: *b"G483",
+            }),
+            ..EndpointInfo::default()
+        };
+        let mut endpoints = HashMap::from([(lan.id.clone(), lan), (ble.id.clone(), ble)]);
+        assert_eq!(take_lan_endpoints(&mut endpoints), ["10.0.0.5:4000"]);
+        assert_eq!(endpoints.keys().collect::<Vec<_>>(), ["ble:G483"]);
+    }
+
+    #[test]
     fn transfers_not_heard_of_for_a_long_time_stop_counting_as_active() {
         let now = 10_000;
         let mut active = HashMap::from([
@@ -573,5 +758,44 @@ mod tests {
         let mut left: Vec<_> = active.keys().cloned().collect();
         left.sort();
         assert_eq!(left, ["quiet but alive", "recent"]);
+    }
+
+    fn message(id: &str) -> ChannelMessage {
+        ChannelMessage {
+            id: id.to_owned(),
+            msg: rqs_lib::channel::Message::Lib {
+                action: rqs_lib::channel::TransferAction::TransferCancel,
+            },
+        }
+    }
+
+    const SHORT: Duration = Duration::from_millis(60);
+
+    #[tokio::test]
+    async fn a_send_has_started_when_its_own_first_event_arrives() {
+        let (tx, mut rx) = broadcast::channel(8);
+        tx.send(message("other")).unwrap();
+        tx.send(message("ble:A")).unwrap();
+        assert!(send_started(&mut rx, "ble:A", SHORT).await);
+    }
+
+    #[tokio::test]
+    async fn events_of_other_transfers_do_not_count_as_a_start() {
+        let (tx, mut rx) = broadcast::channel(8);
+        tx.send(message("other")).unwrap();
+        assert!(!send_started(&mut rx, "ble:A", SHORT).await);
+    }
+
+    #[tokio::test]
+    async fn silence_is_a_send_that_never_started() {
+        let (_tx, mut rx) = broadcast::channel::<ChannelMessage>(8);
+        assert!(!send_started(&mut rx, "ble:A", SHORT).await);
+    }
+
+    #[tokio::test]
+    async fn a_stopped_service_is_not_reported_as_a_failed_send() {
+        let (tx, mut rx) = broadcast::channel::<ChannelMessage>(8);
+        drop(tx);
+        assert!(send_started(&mut rx, "ble:A", SHORT).await);
     }
 }

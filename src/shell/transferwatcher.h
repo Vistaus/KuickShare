@@ -32,6 +32,8 @@ private:
     };
 
     void onTransferChanged(const QString &id);
+    void onSendRequested(const QString &id, const QString &device, int files);
+    void onSendRefused(const QString &id);
     void notifyConsent(const QString &id, const QString &device, const QString &pin, Tracked &tracked);
     void notifyReceived(const QString &device, const QString &preview);
     void notifyProblem(const QString &eventId, const QString &title, const QString &text);

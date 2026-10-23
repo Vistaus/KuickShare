@@ -30,6 +30,8 @@ pub struct Settings {
     pub tray_icon: bool,
     pub dolphin_integration: bool,
     pub trusted_devices: bool,
+    /// Move transfers to a temporary Wi-Fi hotspot when the phone offers it.
+    pub wifi_upgrade: bool,
 }
 
 impl Default for Settings {
@@ -46,6 +48,7 @@ impl Default for Settings {
             tray_icon: true,
             dolphin_integration: true,
             trusted_devices: true,
+            wifi_upgrade: false,
         }
     }
 }
@@ -126,6 +129,7 @@ mod tests {
             tray_icon: false,
             dolphin_integration: false,
             trusted_devices: false,
+            wifi_upgrade: true,
         };
         settings.save(&path).unwrap();
         assert_eq!(Settings::load(&path), settings);

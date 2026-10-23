@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The AppImage is named `KuickShare-x86_64.AppImage`, without the version, so `releases/latest/download/KuickShare-x86_64.AppImage` is a stable link. Its update information follows the new name; the tarball keeps the version.
+- Preferences: new "Application menu entry" switch in the AppImage, to add or remove the menu entry at any time.
+- The first-start dialog is skipped when `XDG_CURRENT_DESKTOP` is not set (Xvfb, containers), so it no longer covers the main window there.
+
 ## 1.1.2
 
 - Add the Dutch translation (thanks to Vistaus).

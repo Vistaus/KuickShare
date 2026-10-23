@@ -37,6 +37,31 @@ private Q_SLOTS:
         QCOMPARE(model.info(QStringLiteral("a")).value(QStringLiteral("state")).toString(), QStringLiteral("SendingFiles"));
     }
 
+    void pendingSendIsTakenOverByTheFirstEvent()
+    {
+        TransferModel model;
+        model.update(QStringLiteral("ble:X"), {{QStringLiteral("kind"), QStringLiteral("outbound")},
+                                               {QStringLiteral("state"), QStringLiteral("Starting")},
+                                               {QStringLiteral("device"), QStringLiteral("Pixel")}});
+        model.update(QStringLiteral("ble:X"), event(QStringLiteral("SentIntroduction")));
+        QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(stateAt(model, 0), QStringLiteral("SentIntroduction"));
+        QCOMPARE(model.data(model.index(0), TransferModel::KindRole).toString(), QStringLiteral("outbound"));
+        QCOMPARE(model.data(model.index(0), TransferModel::DeviceRole).toString(), QStringLiteral("Pixel"));
+    }
+
+    void refusedPendingSendEndsAsOneFinishedRow()
+    {
+        TransferModel model;
+        model.update(QStringLiteral("a"), event(QStringLiteral("Starting"), QStringLiteral("Pixel")));
+        model.update(QStringLiteral("a"), event(QStringLiteral("Disconnected")));
+        model.update(QStringLiteral("a"), event(QStringLiteral("Disconnected"))); // the watchdog later
+        QCOMPARE(model.rowCount(), 1);
+        QVERIFY(TransferModel::isFinal(stateAt(model, 0)));
+        model.update(QStringLiteral("a"), event(QStringLiteral("Starting"), QStringLiteral("Pixel"))); // a retry
+        QCOMPARE(model.rowCount(), 2);
+    }
+
     void historyIsAppendedBelowLiveTransfers()
     {
         TransferModel model;

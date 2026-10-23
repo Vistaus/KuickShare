@@ -36,7 +36,10 @@ class CoreBridge : public QObject
     Q_PROPERTY(qulonglong historyBytes READ historyBytes NOTIFY historyBytesChanged)
     Q_PROPERTY(bool trustedDevicesEnabled READ trustedDevicesEnabled WRITE setTrustedDevicesEnabled NOTIFY trustedDevicesEnabledChanged)
     Q_PROPERTY(bool trayIcon READ trayIcon WRITE setTrayIcon NOTIFY trayIconChanged)
+    Q_PROPERTY(bool wifiUpgrade READ wifiUpgrade WRITE setWifiUpgrade NOTIFY wifiUpgradeChanged)
     Q_PROPERTY(bool dolphinIntegration READ dolphinIntegration WRITE setDolphinIntegration NOTIFY dolphinIntegrationChanged)
+    Q_PROPERTY(bool appImage READ appImage CONSTANT)
+    Q_PROPERTY(bool menuEntry READ menuEntry WRITE setMenuEntry NOTIFY menuEntryChanged)
     Q_PROPERTY(bool historyEnabled READ historyEnabled WRITE setHistoryEnabled NOTIFY historyEnabledChanged)
     Q_PROPERTY(int historyKeepDays READ historyKeepDays WRITE setHistoryKeepDays NOTIFY historyKeepDaysChanged)
     Q_PROPERTY(bool hideWhenDnd READ hideWhenDnd WRITE setHideWhenDnd NOTIFY hideWhenDndChanged)
@@ -68,8 +71,11 @@ public:
     bool clipboardHasFiles() const { return m_clipboardHasFiles; }
     qulonglong historyBytes() const { return m_historyBytes; }
     bool trustedDevicesEnabled() const { return m_trustedDevicesEnabled; }
+    bool wifiUpgrade() const { return m_wifiUpgrade; }
     bool dolphinIntegration() const { return m_dolphinIntegration; }
     int historyKeepDays() const { return m_historyKeepDays; }
+    bool appImage() const;
+    bool menuEntry() const;
     QVariantList trustedDevices() const { return m_trustedDevices; }
     QVariantList allowedDevices() const { return m_allowedDevices; }
 
@@ -82,7 +88,13 @@ public:
     void setHistoryEnabled(bool enabled);
     void setTrayIcon(bool show);
     void setTrustedDevicesEnabled(bool enabled);
+    void setWifiUpgrade(bool enabled);
+    /// Turns the Wi-Fi upgrade on, or emits `firewallWarning` first when firewalld is not running (the
+    /// hotspot would then use a zone that lets the phone reach every port) and waits for the user.
+    Q_INVOKABLE void requestWifiUpgrade();
     void setDolphinIntegration(bool enabled);
+    /// AppImage only: writes or removes the application menu entry (no first-start question is asked afterwards).
+    void setMenuEntry(bool enabled);
     void setHistoryKeepDays(int days);
     Q_INVOKABLE void removeTransfer(const QString &id);
     void setSuspended(bool suspended);
@@ -93,6 +105,8 @@ public:
 
     Q_INVOKABLE void startDiscovery();
     Q_INVOKABLE void stopDiscovery();
+    /// One more Bluetooth scan window while discovery is on.
+    Q_INVOKABLE void scanBluetooth();
     Q_INVOKABLE void sendFiles(const QString &deviceId, const QStringList &paths);
     /// How many files the last send to this device contained (0 if unknown).
     int outgoingFileCount(const QString &deviceId) const { return m_outgoingFileCounts.value(deviceId); }
@@ -150,7 +164,10 @@ Q_SIGNALS:
     void historyEnabledChanged();
     void trayIconChanged();
     void trustedDevicesEnabledChanged();
+    void wifiUpgradeChanged();
+    void firewallWarning();
     void dolphinIntegrationChanged();
+    void menuEntryChanged();
     void historyKeepDaysChanged();
     void trustedDevicesChanged();
     void allowedDevicesChanged();
@@ -159,6 +176,10 @@ Q_SIGNALS:
     /// A request to the core failed; the message is meant for the user.
     void errorOccurred(const QString &message);
     void transferChanged(const QString &id);
+    /// A send of files was requested; the transfer starts later (scan, connection, consent).
+    void sendRequested(const QString &deviceId, const QString &deviceName, int fileCount);
+    /// The core refused the send request before a transfer existed.
+    void sendRefused(const QString &deviceId);
 
 private Q_SLOTS:
     void onTransferUpdated(const QString &id, const QVariantMap &received);
@@ -172,8 +193,10 @@ private Q_SLOTS:
     void onServiceUnregistered();
 
 private:
+    /// Ends a pending send row that the core never took over.
+    void failIfStarting(const QString &deviceId, quint64 sendNo);
     void call(const QString &method, const QVariantList &args);
-    void callAsync(const QDBusMessage &message, const std::function<void()> &onSuccess = {});
+    void callAsync(const QDBusMessage &message, const std::function<void()> &onSuccess = {}, const std::function<void()> &onError = {});
     void setRemoteProperty(const QString &name, const QVariant &value);
     void refreshProperties();
     void loadHistory();
@@ -187,6 +210,8 @@ private:
     QProcess m_core;
     QTimer m_discoveryStopTimer;
     QHash<QString, int> m_outgoingFileCounts;
+    /// Number of the latest send per device, so a late failure never ends a newer send's row.
+    QHash<QString, quint64> m_sendNo;
     bool m_discoveryRunning = false;
     bool m_connected = false;
     bool m_serviceStarting = false;
@@ -199,6 +224,7 @@ private:
     bool m_historyEnabled = true;
     // Off until the core says otherwise: the tray icon stays hidden meanwhile.
     bool m_trayIcon = false;
+    bool m_wifiUpgrade = false;
     bool m_dolphinIntegration = true;
     bool m_trustedDevicesEnabled = true;
     int m_historyKeepDays = 0;

@@ -30,6 +30,39 @@ TransferWatcher::TransferWatcher(CoreBridge *core, QObject *parent)
 {
     m_clock.start();
     connect(core, &CoreBridge::transferChanged, this, &TransferWatcher::onTransferChanged);
+    connect(core, &CoreBridge::sendRequested, this, &TransferWatcher::onSendRequested);
+    connect(core, &CoreBridge::sendRefused, this, &TransferWatcher::onSendRefused);
+}
+
+void TransferWatcher::onSendRequested(const QString &id, const QString &device, int files)
+{
+    Tracked &tracked = m_tracked[id];
+    if (tracked.finished)
+    {
+        tracked = Tracked(); // the same id starts a new transfer
+    }
+    if (tracked.job)
+    {
+        return;
+    }
+    // Show the job right away: finding the device and connecting can take several seconds.
+    auto *job = new TransferJob(id, true, device, this);
+    connect(job, &TransferJob::cancelRequested, m_core, &CoreBridge::cancel);
+    job->setSummary(i18np("%1 file", "%1 files", files));
+    job->setStatus(id.startsWith(QLatin1String("ble:")) ? i18n("Looking for the device…") : i18n("Connecting…"));
+    m_tracker.registerJob(job);
+    job->start();
+    tracked.job = job;
+}
+
+void TransferWatcher::onSendRefused(const QString &id)
+{
+    Tracked &tracked = m_tracked[id];
+    if (tracked.job && !tracked.started)
+    {
+        tracked.job->finish(false, true);
+    }
+    tracked.finished = true;
 }
 
 void TransferWatcher::onTransferChanged(const QString &id)
@@ -67,6 +100,12 @@ void TransferWatcher::onTransferChanged(const QString &id)
         tracked.consent->close();
     }
 
+    // The step a send is in until the files start to move.
+    if (outbound && tracked.job && !tracked.started && !TransferModel::isFinal(state))
+    {
+        tracked.job->setStatus(state == QLatin1String("SentIntroduction") ? i18n("Waiting for the other device to accept") : i18n("Connecting…"));
+    }
+
     // Text and links are tiny: only real file transfers get a progress job.
     if (isTransferring(state))
     {
@@ -74,7 +113,20 @@ void TransferWatcher::onTransferChanged(const QString &id)
     }
     if (isTransferring(state) && total > 0 && preview.isEmpty())
     {
-        if (!tracked.job)
+        if (tracked.job)
+        {
+            // Over Bluetooth the phone offers a Wi-Fi link right after it accepted: nothing moves
+            // until it is up, which takes several seconds.
+            if (outbound && acked == 0 && id.startsWith(QLatin1String("ble:")))
+            {
+                tracked.job->setStatus(i18n("Switching to Wi-Fi…"), true);
+            }
+            else
+            {
+                tracked.job->setStatus(QString());
+            }
+        }
+        else
         {
             auto *job = new TransferJob(id, outbound, device, this);
             connect(job, &TransferJob::cancelRequested, m_core, &CoreBridge::cancel);
@@ -114,7 +166,8 @@ void TransferWatcher::onTransferChanged(const QString &id)
     // A received file gets its own "Files received" notification: close the job without a second one.
     if (tracked.job)
     {
-        tracked.job->finish(success, success && !outbound && preview.isEmpty());
+        // Nothing moved yet: the job only said "Connecting", the failure notification follows.
+        tracked.job->finish(success, (success && !outbound && preview.isEmpty()) || !tracked.started);
     }
 
     const QString who = device.isEmpty() ? i18n("a nearby device") : device;
@@ -126,7 +179,10 @@ void TransferWatcher::onTransferChanged(const QString &id)
     {
         // The library reports a refusal by the other device as "Disconnected"; before any data
         // moved that is the most likely reason (it can also be a full disk or a timeout).
-        notifyProblem(QStringLiteral("transferFailed"), i18n("Transfer not accepted"), i18n("%1 declined the transfer or could not receive it", who.toHtmlEscaped()));
+        const QString reason = id.startsWith(QLatin1String("ble:"))
+                                   ? i18n("Could not start the transfer to %1 over Bluetooth. The device must show Quick Share's receive screen, and some phones cannot be sent to over Bluetooth yet", who.toHtmlEscaped())
+                                   : i18n("%1 declined the transfer or could not receive it", who.toHtmlEscaped());
+        notifyProblem(QStringLiteral("transferFailed"), i18n("Transfer not accepted"), reason);
     }
     else if (state == QLatin1String("Disconnected"))
     {
@@ -145,8 +201,11 @@ void TransferWatcher::notifyConsent(const QString &id, const QString &device, co
     auto *accept = notification->addAction(i18n("Accept"));
     connect(accept, &KNotificationAction::activated, this, [this, id]
             { m_core->accept(id); });
-    // Trusting a device is a feature that can be turned off in the settings.
-    if (m_core->trustedDevicesEnabled())
+    // Trusting a device is a feature that can be turned off in the settings. It needs the sender's
+    // MAC address, which only exists for transfers over the network (id "ip:port"), not for Bluetooth
+    // ones (id "ble-N"). The core reads the MAC from the IPv4 neighbour table, so an IPv6 id would
+    // need the same check there.
+    if (m_core->trustedDevicesEnabled() && id.contains(QLatin1Char(':')))
     {
         auto *trust = notification->addAction(i18n("Accept and trust"));
         connect(trust, &KNotificationAction::activated, this, [this, id]

@@ -18,6 +18,9 @@ Kirigami.ApplicationWindow {
     property string currentPage: ""
     // Files queued for sending; filled from the Send page or by dropping onto the window.
     property var outgoingFiles: []
+    // The send in progress: when it finishes the Send page is left clean, ready for the next one.
+    // A failed send keeps the files and the text so that it can be tried again.
+    property string pendingSendId: ""
 
     title: i18n("KuickShare")
     // Compact, fixed size (so it cannot be maximized or resized): the pages scroll when needed.
@@ -32,6 +35,27 @@ Kirigami.ApplicationWindow {
     flags: Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowMinimizeButtonHint | Qt.WindowCloseButtonHint
     // The window is shown from C++ unless the app was started with --background.
     visible: false
+
+    Connections {
+        target: root.core
+
+        function onTransferChanged(id) {
+            if (id !== root.pendingSendId) {
+                return;
+            }
+            const state = root.core.transfers.info(id).state;
+            if (state !== "Finished") {
+                // A failed send keeps its files and text for another try; no state means the row is gone.
+                if (state === undefined || ["Cancelled", "Rejected", "Disconnected"].includes(state)) {
+                    root.pendingSendId = "";
+                }
+                return;
+            }
+            root.pendingSendId = "";
+            root.outgoingFiles = [];
+            root.pageStack.currentItem?.clearText?.();
+        }
+    }
 
     function show(name) {
         if (name === currentPage) {
@@ -287,7 +311,10 @@ Kirigami.ApplicationWindow {
             onFilesAdded: urls => root.addFiles(urls)
             onFileRemoved: path => root.outgoingFiles = root.outgoingFiles.filter(p => p !== path)
             onFilesCleared: root.outgoingFiles = []
-            onSent: root.show("transfers")
+            onSent: deviceId => {
+                root.pendingSendId = deviceId;
+                root.show("transfers");
+            }
         }
     }
     Component {

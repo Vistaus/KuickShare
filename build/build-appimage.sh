@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds dist/KuickShare-<version>-x86_64.AppImage and its .zsync file, the "Anylinux" way
+# Builds dist/KuickShare-x86_64.AppImage (no version in the name: releases/latest/download/ stays a stable link) and its .zsync file, the "Anylinux" way
 # (https://github.com/pkgforge-dev/Anylinux-AppImages): a self-contained AppImage that ships its own ld.so, libc,
 # Qt 6, KF6 and QML modules, so it runs on any distribution, including NixOS and musl ones (Alpine), without FHS.
 #
@@ -116,10 +116,11 @@ cp -r /usr/share/color-schemes "$share/"
 install -m755 build/appimage/anylinux.hook "$APPDIR/bin/00-kuickshare.hook"
 
 mkdir -p dist
-out=KuickShare-$version-$arch.AppImage
+out=KuickShare-$arch.AppImage
 rm -f "dist/$out" "dist/$out.zsync"
 OUTPATH=$root/dist OUTNAME=$out \
-    UPINFO="gh-releases-zsync|the-beper|KuickShare|latest|KuickShare-*-$arch.AppImage.zsync" \
+    UPINFO="gh-releases-zsync|the-beper|KuickShare|latest|$out.zsync" \
     quick-sharun --make-appimage
 [ -f "dist/$out.zsync" ] || { echo "no .zsync file was written" >&2; exit 1; }
+"dist/$out" --appimage-updateinfo | grep -q "^gh-releases-zsync|the-beper|KuickShare|latest|$out.zsync$" || { echo "wrong update information" >&2; exit 1; }
 echo "Built dist/$out ($(du -h "dist/$out" | cut -f1))"

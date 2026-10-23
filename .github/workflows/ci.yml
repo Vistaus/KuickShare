@@ -39,7 +39,7 @@ jobs:
         run: |
           dnf install -y --setopt=install_weak_deps=False \
             gcc gcc-c++ make cmake ninja-build pkgconf-pkg-config git \
-            dbus-devel dbus-daemon protobuf-compiler squashfs-tools curl \
+            dbus-devel dbus-daemon protobuf-compiler squashfs-tools curl libxml2 desktop-file-utils \
             qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg-devel \
             extra-cmake-modules \
             kf6-kirigami-devel kf6-kstatusnotifieritem-devel kf6-knotifications-devel \
@@ -76,6 +76,11 @@ jobs:
       - name: Shell tests
         run: ctest --test-dir dist/tmp/cmake-dev --output-on-failure
 
+      - name: Metainfo and desktop file
+        run: |
+          xmllint --noout data/*.metainfo.xml
+          desktop-file-validate data/io.github.the_beper.KuickShare.desktop
+
       - name: qmllint
         run: qmllint-qt6 -I /usr/lib64/qt6/qml src/shell/qml/*.qml
 
@@ -94,7 +99,7 @@ jobs:
 
       - name: Test
         run: |
-          build/appimage/test-appimage.sh dist/KuickShare-*-x86_64.AppImage
+          build/appimage/test-appimage.sh dist/KuickShare-x86_64.AppImage
           build/test-tarball.sh dist/KuickShare-*-x86_64.tar.gz
 
   flatpak:

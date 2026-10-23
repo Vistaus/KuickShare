@@ -1,3 +1,4 @@
-/target/
+**/target/
 /dist/
 /build/flatpak/cargo-sources.json
+**/.vscode/

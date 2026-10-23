@@ -57,6 +57,11 @@ impl Daemon {
         let conn = connect(&address).await;
         let core = Command::new(env!("CARGO_BIN_EXE_kuickshared"))
             .env("DBUS_SESSION_BUS_ADDRESS", &address)
+            // The system bus of the machine running the tests must not leak in (firewalld).
+            .env(
+                "DBUS_SYSTEM_BUS_ADDRESS",
+                "unix:path=/nonexistent/kuickshare-it",
+            )
             .env("HOME", &dir)
             .env("XDG_CONFIG_HOME", dir.join("config"))
             .env("XDG_DATA_HOME", dir.join("data"))
@@ -190,6 +195,7 @@ async fn starts_with_the_default_settings() {
     assert!(daemon.get::<bool>("TrayIcon").await);
     assert!(daemon.get::<bool>("DolphinIntegration").await);
     assert!(daemon.get::<bool>("TrustedDevicesEnabled").await);
+    assert!(!daemon.get::<bool>("WifiUpgrade").await);
     assert_eq!(daemon.get::<u32>("HistoryKeepDays").await, 0);
     assert_eq!(daemon.json("History").await, serde_json::json!([]));
     assert_eq!(daemon.json("AllowedDevices").await, serde_json::json!([]));
@@ -223,11 +229,14 @@ async fn integration_settings_are_applied_and_saved() {
     assert!(!daemon.get::<bool>("TrayIcon").await);
     assert!(!daemon.get::<bool>("DolphinIntegration").await);
     assert!(!daemon.get::<bool>("TrustedDevicesEnabled").await);
+    daemon.set("WifiUpgrade", Variant::from(true)).await;
+    assert!(daemon.get::<bool>("WifiUpgrade").await);
     let saved: serde_json::Value =
         serde_json::from_str(&daemon.file("config/kuickshare/settings.json")).unwrap();
     assert_eq!(saved["tray_icon"], false);
     assert_eq!(saved["dolphin_integration"], false);
     assert_eq!(saved["trusted_devices"], false);
+    assert_eq!(saved["wifi_upgrade"], true);
 }
 
 #[tokio::test]
@@ -325,4 +334,46 @@ async fn trusting_needs_a_known_transfer() {
         .await
         .unwrap();
     assert_eq!(daemon.json("AllowedDevices").await, serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn bluetooth_ids_are_refused_where_they_make_no_sense() {
+    let daemon = Daemon::start("ble", None).await;
+
+    let err = daemon.call("PairWith", &("ble:G483",)).await.unwrap_err();
+    assert!(err.to_string().contains("Bluetooth"), "{err}");
+    // Never seen by a scan: unknown, like any other id.
+    let err = daemon
+        .call("SendText", &("ble:G483", "hi", "text"))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("unknown device"), "{err}");
+    // A scan window needs discovery to be on.
+    let err = daemon.call("ScanBluetooth", &()).await.unwrap_err();
+    assert!(
+        err.to_string().contains("discovery is not running"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn a_bluetooth_scan_without_bluez_is_harmless() {
+    let daemon = Daemon::start("scan", None).await;
+
+    daemon.call("StartDiscovery", &()).await.unwrap();
+    daemon.call("ScanBluetooth", &()).await.unwrap();
+    daemon.call("StopDiscovery", &()).await.unwrap();
+}
+
+#[tokio::test]
+async fn the_firewall_check_answers_even_without_a_system_bus() {
+    let daemon = Daemon::start("firewall", None).await;
+
+    // No system bus is reachable: "not managed" is the answer, not an error.
+    let reply = daemon
+        .conn
+        .call_method(Some(NAME), PATH, Some(IFACE), "FirewallManaged", &())
+        .await
+        .unwrap();
+    assert!(!reply.body().deserialize::<bool>().unwrap());
 }
