@@ -506,8 +506,15 @@ Kirigami.ScrollablePage {
         }
 
         Kirigami.InlineMessage {
-            visible: deviceRepeater.count > 0 && !page.hasContent
-            text: i18n("Choose or drop something to send, then pick a device.")
+            visible: page.core.transferBusy && deviceRepeater.count > 0
+            type: Kirigami.MessageType.Information
+            text: i18n("A transfer is in progress. You can send again when it ends")
+            Layout.fillWidth: true
+        }
+
+        Kirigami.InlineMessage {
+            visible: deviceRepeater.count > 0 && !page.hasContent && !page.core.transferBusy
+            text: i18n("Choose or drop something to send, then pick a device")
             Layout.fillWidth: true
         }
 
@@ -526,7 +533,7 @@ Kirigami.ScrollablePage {
                 required property string medium
 
                 Layout.fillWidth: true
-                enabled: page.hasContent
+                enabled: page.hasContent && !page.core.transferBusy
                 showClickFeedback: true
                 onClicked: page.sendTo(deviceId)
 

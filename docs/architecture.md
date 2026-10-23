@@ -78,6 +78,19 @@ flowchart LR
 
 Settings that restart the engine (device name, static port, reset) are refused while a transfer is active. A transfer with no event for 600 s counts as over, so a lost final event cannot block them forever.
 
+### Inside the shell
+
+| Part | Role |
+| --- | --- |
+| `main.cpp` | Window, tray, single instance, starts the core |
+| `corebridge.*` | `CoreBridge`: D-Bus client and the QML-facing state; `transferBusy` is true while a transfer is live and not just awaiting approval |
+| `transfermodel.*` | `TransferModel`: live and history rows; `beginPending`/`failPending` show a send before the core reports it; `busy` and `transferEnded` feed the Send page and the toasts |
+| `transferwatcher.*`, `transferjob.*` | Notifications and the Plasma progress job of each transfer |
+| `devicemodel.*` | Nearby devices |
+| `dndwatcher.*` | Do Not Disturb state |
+| `autostart.*`, `integration.*`, `dolphinmenu.*`, `launcher.h`, `execquote.h` | Autostart and Dolphin entries, first-launch question, `Exec` quoting, AppImage and Flatpak path detection |
+| `qml/` | Pages (Send, Transfers, Settings, Help), dialogs, and `ToastStack.qml`: transient messages shown on whatever page is open |
+
 ## Transfer data flow
 
 Transfer ids are `ip:port` of the remote side, or `ble:<endpoint>` for a phone found over Bluetooth. Event and method names below are shortened; see [dbus-api.md](dbus-api.md).
@@ -350,18 +363,34 @@ flowchart LR
 
 ### AppImage
 
-Built the [Anylinux](https://github.com/pkgforge-dev/Anylinux-AppImages) way, in the Arch image `build/appimage/Containerfile.arch`, with `quick-sharun` (pinned by commit and SHA-256 in the Containerfile; it pins and checks `sharun`, `appimagetool` and the other helpers it downloads). The bundle holds `kuickshare`, `kuickshared`, the dynamic loader and libc, Qt 6 and KF6, the Qt and KF6 plugins and only the QML modules the UI imports (`DEPLOY_QML=1` would copy about 450 MB). It ships no GPU drivers (the host's are used). The AppImage is about 73 MiB.
+Built the [Anylinux](https://github.com/pkgforge-dev/Anylinux-AppImages) way, in the Arch image `build/appimage/Containerfile.arch`, with `quick-sharun` (pinned by commit and SHA-256 in the Containerfile; it pins and checks `sharun`, `appimagetool` and the other helpers it downloads).
+
+| Bundle | Content |
+| --- | --- |
+| Binaries | `kuickshare`, `kuickshared` |
+| Runtime | The dynamic loader and libc, Qt 6 and KF6, the Qt and KF6 plugins |
+| QML | Only the modules the UI imports (`DEPLOY_QML=1` would copy about 450 MB) |
+| GPU drivers | None; the host's are used |
+| Size | About 73 MiB |
 
 - **Direct run.** The hook `build/appimage/anylinux.hook` (installed as `bin/00-kuickshare.hook`) lets a plain start run the bundled `kuickshare`. It sets `QT_QPA_PLATFORMTHEME=kde` (the bundle holds the Plasma platform theme and Breeze icons) so the app follows the host's theme, read from the host's `~/.config`.
 - **Core.** `kuickshared` is started by the shell from its own folder. In the bundle it is a small script that runs the real binary (renamed `kuickshared-core`) through `sharun`, so it uses the bundled libc.
-- **`$APPIMAGE`.** The AppImage runs from a temporary mount, so `Launcher::inAppImage()` (`src/shell/launcher.h`; `APPIMAGE` names an existing file and the program is inside `APPDIR`, so a tarball installation started from a terminal that inherited `APPIMAGE` is not taken for the AppImage) makes the Dolphin, autostart and menu entries point at the `$APPIMAGE` file. Nothing is written by itself: the first start asks once (`src/shell/integration.cpp`, `IntegrationDialog.qml`), and the Preferences toggles write entries on demand.
+- **`$APPIMAGE`.** The AppImage runs from a temporary mount, so `Launcher::inAppImage()` (`src/shell/launcher.h`) makes the Dolphin, autostart and menu entries point at the `$APPIMAGE` file.
+  - Detection: `APPIMAGE` names an existing file and the program is inside `APPDIR`. A tarball installation started from a terminal that inherited `APPIMAGE` is therefore not taken for the AppImage.
+  - Nothing is written by itself: the first start asks once (`src/shell/integration.cpp`, `IntegrationDialog.qml`), and the Preferences toggles write entries on demand.
 - **Updates.** `appimagetool` embeds `gh-releases-zsync|the-beper|KuickShare|latest|KuickShare-x86_64.AppImage.zsync` and writes the `.zsync` file, which the release publishes.
 - **Cache.** The Podman volume `kuickshare-appimage` keeps the cargo registry; each build uses a fresh `TMPDIR` because `quick-sharun` does not re-check cached files.
-- **Test.** `build/appimage/test-appimage.sh` runs the AppImage with `--appimage-extract-and-run` (no FUSE) in bare Debian, Alpine and `nixos/nix` containers with only `dbus` (plus Ubuntu 22.04 with Xvfb and no Wayland: the main window appears within 10 s): the core answers on D-Bus, no QML or plugin errors, only its own data is written, and a second launch hands its files over.
+- **Test.** `build/appimage/test-appimage.sh` runs the AppImage with `--appimage-extract-and-run` (no FUSE):
+  - Where: bare Debian, Alpine and `nixos/nix` containers with only `dbus`, plus Ubuntu 22.04 with Xvfb and no Wayland (the main window appears within 10 s).
+  - Checks: the core answers on D-Bus, no QML or plugin errors, only its own data is written, and a second launch hands its files over.
 
 ### Tarball
 
-`build/build-host-payload.sh` builds, in the Fedora image (`build/Containerfile`, started by `build/build-env.sh`, with the host's rustup and cargo mounted; the host needs no development packages), `kuickshare` and `kuickshared` against the system's Qt 6 / KF6 and stages them with the data files, the compiled translations (`msgfmt --check-format`, so a broken format string fails the build) and `build/appimage/install.sh` in `dist/tmp/host`. `build/build-tarball.sh` packs that folder with a top-level `install.sh` into a reproducible `.tar.gz`; 
+Built in three steps:
+
+1. `build/build-host-payload.sh` builds `kuickshare` and `kuickshared` against the system's Qt 6 / KF6 in the Fedora image (`build/Containerfile`, started by `build/build-env.sh`, with the host's rustup and cargo mounted; the host needs no development packages).
+2. The same script stages them in `dist/tmp/host` with the data files, the compiled translations (`msgfmt --check-format`, so a broken format string fails the build) and `build/appimage/install.sh`.
+3. `build/build-tarball.sh` packs that folder with a top-level `install.sh` into a reproducible `.tar.gz`.
 
 - **Host libraries.** Qt 6 and KF6 are not bundled in the payload ([THIRD_PARTY.md](../THIRD_PARTY.md) lists them). The installer checks with `ldd` for missing libraries and for the QML modules `org/kde/kirigami` and `org/kde/kirigamiaddons/formcard`, and prints the `dnf` or `pacman` command if something is missing.
 - **Install.** Binaries are copied to a `.new` file and moved into place, so an update does not hit "text file busy". A running instance is stopped first (SIGTERM, then SIGKILL after 5 s) and restarted afterwards. The Dolphin entry is not reinstalled if `dolphin_integration` is `false` in the settings. `~/.local/bin/kuickshare` is linked only if it is missing or already ours. The translations go to `~/.local/share/locale/<lang>/LC_MESSAGES/kuickshare.mo`, where KDE looks for them.
@@ -382,6 +411,17 @@ flowchart LR
 
 - **Build environment.** The container needs `--privileged` for bwrap. Runtimes and the build cache live in the podman volume `kuickshare-flatpak`, not on the host.
 - **Sandbox holes.** The permissions are listed in the [usage guide](usage.md#flatpak). The shell must own `org.kde.kuickshare` (`KDBusService`; the app does not start without it). The tray item registers with its connection name, so it needs no name of its own (tested against a fake watcher).
-- **Paths.** Inside the sandbox `XDG_*` point to `~/.var/app/<id>`, so `src/shell/launcher.h` finds the host's data and config folders in `/proc/self/mountinfo`, where Flatpak mounts the granted `kio/servicemenus` and `autostart` folders at their host paths (default `$HOME/.local/share` and `$HOME/.config` if none is found), for the Dolphin and autostart entries. A download folder is accepted only if it is under a mount that is not one of the sandbox's private ones (`/tmp`, `/run`, `/usr`, ...), or under a portal document or `/run/media`; otherwise files written there would be lost with the sandbox. This check is covered by unit tests on sample mount tables, not yet in a real sandbox. `Exec` becomes `flatpak run --file-forwarding <id> @@ %F @@`, which hands the files to the sandbox through the document portal. With no installer, the shell writes the Dolphin entry on start when the setting is on and the file is missing.
+- **Paths.** Inside the sandbox `XDG_*` point to `~/.var/app/<id>`, so `src/shell/launcher.h` finds the host's folders for the Dolphin and autostart entries in `/proc/self/mountinfo`.
+  - Flatpak mounts the granted `kio/servicemenus` and `autostart` folders there at their host paths. If none is found, the default is `$HOME/.local/share` and `$HOME/.config`.
+  - `Exec` becomes `flatpak run --file-forwarding <id> @@ %F @@`, which hands the files to the sandbox through the document portal.
+  - With no installer, the shell writes the Dolphin entry on start when the setting is on and the file is missing.
+  - A download folder is accepted only under a mount that is not one of the sandbox's private ones (`/tmp`, `/run`, `/usr`, ...), or under a portal document or `/run/media`; otherwise files written there would be lost with the sandbox. This check is covered by unit tests on sample mount tables, not yet in a real sandbox.
 - **Repository.** `release.yml` builds with `--gpg-sign` (secret `FLATPAK_GPG_PRIVATE_KEY`), adds the commit to the repository fetched from the `gh-pages` branch, and `build/flatpak/publish-repo.sh` prunes it and writes `kuickshare.flatpakrepo` and `kuickshare.flatpakref` with the public key. The branch is replaced by a single commit each release so OSTree objects do not pile up in the git history.
-- **Test.** `build/flatpak/test-flatpak.sh` installs the bundle in a container with offscreen Qt and a private session bus, and with non-default `XDG_*` folders, a fake `StatusNotifierWatcher` and the document portal. It checks that the core answers on D-Bus, the tray item registers, the Dolphin entry lands in the host folder, a file is forwarded to the sandbox and a second launch hands over to the running instance. Notifications, job progress, the file chooser and Dolphin itself need a real Plasma session and are untested.
+- **Test.** `build/flatpak/test-flatpak.sh` installs the bundle in a container with offscreen Qt, a private session bus, non-default `XDG_*` folders, a fake `StatusNotifierWatcher` and the document portal. It checks that:
+  - the core answers on D-Bus;
+  - the tray item registers;
+  - the Dolphin entry lands in the host folder;
+  - a file is forwarded to the sandbox;
+  - a second launch hands over to the running instance.
+
+  Notifications, job progress, the file chooser and Dolphin itself need a real Plasma session and are untested.

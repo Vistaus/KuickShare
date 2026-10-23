@@ -43,9 +43,14 @@ public:
     /// Ends that pending send as Disconnected, unless the core took it over or a newer send to the
     /// same id began since.
     void failPending(const QString &id, quint64 number);
+    /// Ends a send that is still "Starting" as Cancelled; false when the row is not in that state.
+    bool cancelPending(const QString &id);
     /// True for states a transfer never leaves.
     static bool isFinal(const QString &state);
     bool hasActive() const;
+    /// True while a transfer is live (not finished) and not just waiting for the user's approval:
+    /// the Send page does not start another one meanwhile.
+    bool busy() const { return m_busy; }
     /// Appends a finished transfer from an earlier session (below the live ones).
     void addHistory(const QVariantMap &info);
     void remove(const QString &id);
@@ -53,12 +58,20 @@ public:
     void clearAll();
     Q_INVOKABLE QVariantMap info(const QString &id) const;
 
+signals:
+    void busyChanged();
+    /// A transfer reached a final state (once per transfer): `state` is Finished, Cancelled, Rejected or Disconnected.
+    void transferEnded(const QString &id, const QString &state);
+
 private:
+    void updateBusy();
+
     struct Entry
     {
         QString id;
         QVariantMap info;
     };
     QList<Entry> m_entries;
+    bool m_busy = false;
     QHash<QString, quint64> m_pendingNumber;
 };

@@ -57,6 +57,8 @@ type HmacSha256 = Hmac<Sha256>;
 
 const SANE_FRAME_LENGTH: i32 = 5 * 1024 * 1024;
 const SANITY_DURATION: Duration = Duration::from_micros(10);
+/// Pause before the first encrypted frame of a Bluetooth session (see `process_connection_response`).
+const BLE_ENCRYPTION_SETTLE: Duration = Duration::from_millis(200);
 /// Peer frames read while a chunk is written and kept for the next `handle()`; beyond this
 /// only the frames the transfer needs (upgrade negotiation) are still kept, the rest is dropped.
 const MAX_PENDING_FRAMES: usize = 32;
@@ -554,6 +556,13 @@ impl OutboundRequest {
             }),
         };
 
+        // Over Bluetooth the phone switches its reading side to the encrypted channel a few
+        // milliseconds after it sends its own ConnectionResponse; a first encrypted frame that
+        // arrives before that is parsed as a plain frame and the phone drops the session with
+        // "Incorrect sequence number" (seen on a Galaxy A55 in 2 of 3 sends, inferred from its log).
+        if matches!(self.socket, MigratableStream::Duplex(_)) {
+            tokio::time::sleep(BLE_ENCRYPTION_SETTLE).await;
+        }
         self.send_encrypted_frame(&paired_encryption).await?;
 
         Ok(())
@@ -1657,7 +1666,7 @@ impl OutboundRequest {
     /// frame in the middle of it would corrupt the stream. It can be large (a chunk) and the
     /// peer may not be reading; then the timeout ends the attempt and the caller drops the
     /// socket, which closes it.
-    async fn cancel_peer(&mut self, unsent: &[u8]) {
+    pub(crate) async fn cancel_peer(&mut self, unsent: &[u8]) {
         info!("Transfer canceled by the user");
         self.user_cancelled = true;
         let closing = async {
@@ -1998,7 +2007,7 @@ pub(super) fn sharing_cancel_frame() -> sharing_nearby::Frame {
 const SEND_STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Resolves when a cancel of the transfer `id` arrives; never when the bus closes.
-async fn wait_for_cancel(rx: &mut Receiver<ChannelMessage>, id: &str) {
+pub(crate) async fn wait_for_cancel(rx: &mut Receiver<ChannelMessage>, id: &str) {
     use tokio::sync::broadcast::error::RecvError;
     loop {
         match rx.recv().await {

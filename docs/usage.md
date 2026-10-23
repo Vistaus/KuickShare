@@ -4,6 +4,13 @@ KuickShare sends and receives files, text and links with Android phones through 
 
 KuickShare has two programs. `kuickshare` is the window, tray icon and notifications. `kuickshared` is the background service that speaks the Quick Share protocol; the window starts it and stops it.
 
+## In this guide
+
+- Setup: [Requirements](#requirements), [Installing, updating and uninstalling](#installing-updating-and-uninstalling), [First run](#first-run)
+- Daily use: [Sending](#sending), [Receiving](#receiving), [Without a shared network](#without-a-shared-network-experimental), [Transfers page and history](#transfers-page-and-history)
+- Devices: [Paired devices](#paired-devices), [Trusted devices](#trusted-devices)
+- Reference: [Preferences](#preferences), [Do Not Disturb](#do-not-disturb), [Keyboard shortcuts](#keyboard-shortcuts), [Troubleshooting](#troubleshooting), [Where things are stored](#where-things-are-stored)
+
 ## Requirements
 
 - KDE Plasma 6. The AppImage and the Flatpak bring their own libraries (the Flatpak needs Flatpak and [Flathub](https://flathub.org/setup)). The tarball uses the system's Qt 6 and KDE Frameworks 6: on Fedora, `kf6-kirigami`, `kf6-kirigami-addons` and `qt6-qtdeclarative`. The installer checks for them and prints the `dnf install` (or `pacman`) line if one is missing.
@@ -37,7 +44,14 @@ The sandbox is deliberately open where the integration needs it:
 | Downloads folder | Received files. Another download folder is refused with a message until you grant it: `flatpak override --user --filesystem=/path io.github.the_beper.KuickShare` |
 | `~/.local/share/kio/servicemenus` and `~/.config/autostart` (write) | The app writes the Dolphin entry and the autostart entry there, since Flatpak cannot export them |
 
-Both entries start the app through `flatpak run`. The app finds the host folders from where Flatpak mounts the two granted ones, so a custom `XDG_DATA_HOME` or `XDG_CONFIG_HOME` works (tested in a container); without such a mount it falls back to `~/.local/share` and `~/.config`. The AppImage and the Flatpak write the same Dolphin entry file, so install only one. Uninstalling the Flatpak leaves the two entries behind: remove `kuickshare-send.desktop` and `io.github.the_beper.KuickShare.desktop` from those folders. Files sent from Dolphin, the file chooser or by drag and drop reach the sandbox through the document portal. The hand-over of a file from a second launch is tested in a container; the file chooser and Dolphin are unverified on a real desktop.
+The Dolphin and autostart entries:
+
+- Both start the app through `flatpak run`.
+- The app finds the host folders from where Flatpak mounts the two granted ones, so a custom `XDG_DATA_HOME` or `XDG_CONFIG_HOME` works (tested in a container). Without such a mount it falls back to `~/.local/share` and `~/.config`.
+- The AppImage and the Flatpak write the same Dolphin entry file, so install only one.
+- Uninstalling the Flatpak leaves both behind: remove `kuickshare-send.desktop` and `io.github.the_beper.KuickShare.desktop` from those folders.
+
+Files sent from Dolphin, the file chooser or by drag and drop reach the sandbox through the document portal. The hand-over of a file from a second launch is tested in a container; the file chooser and Dolphin are unverified on a real desktop.
 
 ### AppImage
 
@@ -50,7 +64,17 @@ chmod +x KuickShare-x86_64.AppImage
 
 It can be managed with the usual tools ([Gear Lever](https://github.com/mijorus/gearlever), [AM / AppMan](https://github.com/ivan-hc/AM), [soar](https://github.com/pkgforge/soar)) and updates with `appimageupdatetool` or any updater that reads its embedded update information (zsync, GitHub releases).
 
-On the first start it asks once whether to add KuickShare to the application menu and Dolphin's context menu. "Add" writes the menu entry and the Dolphin entry, both pointing at the AppImage file (if you move the file, turn the Dolphin entry off and on again in Preferences); "Not now" turns the Dolphin entry off in Preferences. The Preferences have an "Application menu entry" switch (AppImage only) that adds or removes the menu entry at any time, so it also works where the question is not asked. Nothing is asked if an installation or those entries already exist, if the app starts with `--background`, or if `XDG_CURRENT_DESKTOP` is not set (a bare session such as Xvfb). The answer is remembered in `~/.config/kuickshare/integration-asked`; to remove the menu entry delete `~/.local/share/applications/io.github.the_beper.KuickShare.desktop` and the icons it installed.
+On the first start it asks once whether to add KuickShare to the application menu and Dolphin's context menu:
+
+| Answer | Effect |
+|---|---|
+| Add | Writes the menu entry and the Dolphin entry, both pointing at the AppImage file. If you move the file, turn the Dolphin entry off and on again in Preferences |
+| Not now | Turns the Dolphin entry off in Preferences |
+
+- The Preferences have an "Application menu entry" switch (AppImage only) that adds or removes the menu entry at any time, so it also works where the question is not asked.
+- Nothing is asked if an installation or those entries already exist, if the app starts with `--background`, or if `XDG_CURRENT_DESKTOP` is not set (a bare session such as Xvfb).
+- The answer is remembered in `~/.config/kuickshare/integration-asked`.
+- To remove the menu entry, delete `~/.local/share/applications/io.github.the_beper.KuickShare.desktop` and the icons it installed.
 
 | Command | Effect |
 |---|---|
@@ -113,9 +137,11 @@ The tabs are Send and Transfers. The icon at their right opens a menu with Prefe
 
 ![The Send page with a device list](screenshots/send.png)
 
-The Send page takes files, or text, or a link. Choose what to send, then click a device in the "Send to" list. The status line at the top says whether this computer is ready, hidden or hidden by Do Not Disturb.
+The Send page takes files, or text, or a link. Choose what to send, then click a device in the "Send to" list. While a transfer is running (sending or receiving, not one that only waits for your approval) the devices are greyed out and a note says so; you can still queue files and text, and send when it ends. The status line at the top says whether this computer is ready, hidden or hidden by Do Not Disturb.
 
 On the phone, open Quick Share and set it to receive from **Everyone** first. See [Troubleshooting](#troubleshooting).
+
+Before sending to a device found on the network, KuickShare checks for up to 1.5 s that it answers. If the phone is gone (for example its Wi-Fi went off, which it does not announce), its entry disappears and the send goes over Bluetooth to the phone with the same name and device type, when the Wi-Fi upgrade is on and exactly one matches (if none is known yet, it scans Bluetooth for up to 3 s); otherwise it stops with "The device is not reachable". The other way round, a phone listed over Bluetooth that answers on the network is reached over the network; if the network list has no such phone yet, the send restarts the network search and waits up to 1.5 s for it before staying on Bluetooth. A phone that is first seen only over Bluetooth makes the network search restart every 5 s (up to 4 times) until it shows up on the network. The transfer row keeps the entry you clicked. **Cancel** is available from the moment you press a device ("Looking for the device…", "Connecting…", "Waiting for the other device to accept").
 
 ### Files
 
@@ -180,13 +206,33 @@ With **Settings → Wi-Fi Direct → Receive and send without a shared network**
 | Wi-Fi link | This computer starts a hotspot | The phone starts a Wi-Fi Direct group and this computer joins it |
 | Needs | The `dnsmasq` package: NetworkManager runs it to give the phone an address | Nothing extra |
 
-- Needs NetworkManager and Bluetooth, no privileges. With firewalld the computer opens only the port of the transfer. Without it (ufw, nftables or none) the Wi-Fi hotspot is put in a zone that lets the phone reach every service of the computer, so turning the setting on asks you to confirm. A computer with one radio can lose its Wi-Fi connection while the link is up.
+**Requirements and firewall**
+
+- NetworkManager and Bluetooth; no privileges.
+- With firewalld the computer opens only the port of the transfer.
+- Without firewalld (ufw, nftables or none) the Wi-Fi hotspot is put in a zone that lets the phone reach every service of the computer, so turning the setting on asks you to confirm.
+- A computer with one radio can lose its Wi-Fi connection while the link is up.
+
+**Visibility**
+
 - While the setting is on, this computer is visible over Bluetooth, under its device name, to devices in range. Nothing is sent without your consent.
-- "Accept and trust" is not offered for Bluetooth transfers, and a PIN is shown for each one: compare it with the phone.
-- When the last network connection drops (for example the Wi-Fi is turned off), the devices found over the network disappear from the Send page at once and a Bluetooth scan starts, so a phone that is still in range shows up with the Bluetooth icon after a few seconds. When a network comes back, the search for devices starts over at once, so a phone on it is found without waiting for the periodic check (up to about 30 s). This needs NetworkManager and the setting on.
 - A phone on the same network as the computer is reached over the network and never takes part in the upgrade; it is listed once, even if Bluetooth sees it too.
+
+**Trust and PIN**
+
+- "Accept and trust" is not offered for Bluetooth transfers.
+- A PIN is shown for each one: compare it with the phone.
+
+**Network changes** (need NetworkManager and the setting on)
+
+- When the last network connection drops (for example the Wi-Fi is turned off), the devices found over the network disappear from the Send page at once and a Bluetooth scan starts. A phone still in range shows up with the Bluetooth icon after a few seconds.
+- When a network comes back, the search for devices starts over at once, so a phone on it is found without waiting for the periodic check (up to about 30 s).
+
+**Plasma and the job tracker**
+
 - Plasma shows "Connection 'kuickshare-ap' activated" for the temporary link. It cannot be hidden per connection, only for all networks in System Settings → Notifications → Network Management.
-- When you press a device on the Send page, the Transfers page gets its row and a job appears in Plasma's job tracker at once; the job names the step: "Looking for the device…", "Connecting…", "Waiting for the other device to accept", then "Switching to Wi-Fi…" until data moves. When it finishes, the Send page is left empty; after a failure the files and text stay for a new attempt.
+- When you press a device on the Send page, the Transfers page gets its row and a job appears in Plasma's job tracker at once. The job names the step, in this order: "Looking for the device…", "Connecting…", "Waiting for the other device to accept", then "Switching to Wi-Fi…" until data moves.
+- When it finishes, the Send page is left empty; after a failure the files and text stay for a new attempt.
 
 ## Transfers page and history
 
@@ -202,6 +248,16 @@ The Transfers page lists transfers newest first, running ones included. A card s
 | Copy | A text or link was received or sent |
 | More details | Always on finished entries: result, size, file names or text |
 | Remove from list | Finished entries |
+
+When a transfer ends, a message slides up from the bottom edge of the window, on any page, and stacks above older ones (at most four):
+
+| Message | Colour | Stays |
+|---|---|---|
+| Transfer completed | Green | 4 s |
+| The transfer failed | Red | 10 s |
+| The transfer was declined, The transfer was cancelled | Blue | 6 s |
+
+Errors the service reports, and "Copied to clipboard" (green, 1.5 s), use the same messages. A message that stays more than 3 s has a close button.
 
 Entries keep at most 200 file names and 10000 characters of text. Wi-Fi credentials received from a phone are stored without the password. **Clear history** deletes the list and does not touch received files. A banner suggests clearing when the history file gets large.
 
@@ -295,6 +351,8 @@ Also listed in the app under More, Shortcuts.
 **The red banner "The sharing service is not running".** The window could not reach `kuickshared`. Click **Start service** in the banner. If it does not come back, start `kuickshare` from a terminal to see the service's output.
 
 **A trusted phone is asked about again.** It joined another network and has a new MAC, or its name changed. Accept and trust it again.
+
+**A phone stays in the list after its Wi-Fi went off, or sending ends with "The device is not reachable".** The phone left the network without saying so. Pressing it removes the entry. Turn its Wi-Fi on, or open Quick Share on it so it appears again. Over the network a send waits at most 8 s to connect and 20 s for the handshake, then reports the failure.
 
 **Transfer not accepted.** The phone declined, timed out, or could not receive (for instance, a full disk).
 

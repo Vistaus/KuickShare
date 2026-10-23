@@ -19,69 +19,12 @@ Kirigami.ScrollablePage {
     Kirigami.PromptDialog {
         id: clearDialog
         title: i18n("Clear history?")
-        subtitle: i18n("Files you received are not touched.")
+        subtitle: i18n("Files you received are not touched")
         standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
         onAccepted: page.core.clearHistory()
     }
 
-    QQC2.Popup {
-        id: copiedToast
-
-        function show() {
-            open();
-            hideTimer.restart();
-        }
-
-        parent: QQC2.Overlay.overlay
-        x: Math.round((parent.width - width) / 2)
-        y: parent.height - height - Kirigami.Units.gridUnit * 2
-        modal: false
-        focus: false
-        closePolicy: QQC2.Popup.NoAutoClose
-        padding: Kirigami.Units.largeSpacing
-
-        enter: Transition {
-            NumberAnimation {
-                property: "opacity"
-                from: 0
-                to: 1
-                duration: Kirigami.Units.shortDuration
-            }
-        }
-        exit: Transition {
-            NumberAnimation {
-                property: "opacity"
-                to: 0
-                duration: Kirigami.Units.shortDuration
-            }
-        }
-
-        background: Rectangle {
-            radius: 6
-            color: Kirigami.Theme.backgroundColor
-            border.width: 1
-            border.color: Qt.alpha(Kirigami.Theme.textColor, 0.2)
-        }
-
-        contentItem: RowLayout {
-            spacing: Kirigami.Units.largeSpacing
-
-            Kirigami.Icon {
-                source: "emblem-success"
-                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
-            }
-            QQC2.Label {
-                text: i18n("Copied to clipboard")
-            }
-        }
-
-        Timer {
-            id: hideTimer
-            interval: 1200
-            onTriggered: copiedToast.close()
-        }
-    }
+    required property var toasts
 
     // Size of the saved history above which a warning offers to clear it.
     readonly property real bigHistoryBytes: 5 * 1024 * 1024
@@ -463,6 +406,8 @@ Kirigami.ScrollablePage {
                 readonly property bool awaitingConsent: kind === "inbound" && transferState === "WaitingForUserConsent"
                 readonly property bool active: transferState !== "Finished" && transferState !== "Cancelled" && transferState !== "Rejected" && transferState !== "Disconnected"
                 readonly property bool inProgress: active && !awaitingConsent && totalBytes > 0
+                // An outbound send can be cancelled while it looks for the device or connects.
+                readonly property bool cancellable: inProgress || (kind === "outbound" && active)
                 readonly property bool receivedFiles: kind === "inbound" && transferState === "Finished" && files.length > 0
                 readonly property bool hasText: transferState === "Finished" && files.length === 0 && (bodyText.length > 0 || preview.length > 0)
                 readonly property string content: page.describe(files, bodyText, preview)
@@ -542,7 +487,7 @@ Kirigami.ScrollablePage {
                                     font.weight: Font.DemiBold
                                 }
                                 QQC2.ToolButton {
-                                    visible: item.inProgress
+                                    visible: item.cancellable
                                     icon.name: "process-stop"
                                     display: QQC2.AbstractButton.IconOnly
                                     text: i18n("Cancel")
@@ -631,7 +576,7 @@ Kirigami.ScrollablePage {
                                     icon.name: "edit-copy"
                                     onClicked: {
                                         page.core.copyToClipboard(item.shownText);
-                                        copiedToast.show();
+                                        page.toasts.show(Kirigami.MessageType.Positive, i18n("Copied to clipboard"), 1500);
                                     }
                                 }
                             }

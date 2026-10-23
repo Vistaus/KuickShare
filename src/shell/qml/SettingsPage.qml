@@ -156,7 +156,7 @@ FormCard.FormCardPage {
     Kirigami.InlineMessage {
         visible: true // hidden by default
         type: Kirigami.MessageType.Warning
-        text: i18n("Experimental. Needs NetworkManager, its dnsmasq package and Bluetooth. While on, this computer is visible over Bluetooth to devices in range, and its Wi-Fi connection may drop while the temporary Wi-Fi link is active. See the documentation.")
+        text: i18n("Experimental. Needs NetworkManager, its dnsmasq package and Bluetooth. While on, this computer is visible over Bluetooth to devices in range, and its Wi-Fi connection may drop while the temporary Wi-Fi link is active. See the documentation")
         Layout.fillWidth: true
         Layout.topMargin: Kirigami.Units.largeSpacing
     }
@@ -242,7 +242,7 @@ FormCard.FormCardPage {
     Kirigami.InlineMessage {
         visible: page.core.trustedDevicesEnabled
         type: Kirigami.MessageType.Warning
-        text: i18n("Matched by name and MAC address. Another device that copies both would be accepted too. Use only if you trust all devices in your LAN.")
+        text: i18n("Matched by name and MAC address. Another device that copies both would be accepted too. Use only if you trust all devices in your LAN")
         Layout.fillWidth: true
         Layout.topMargin: Kirigami.Units.largeSpacing
     }
@@ -356,8 +356,8 @@ FormCard.FormCardPage {
     }
     Kirigami.PromptDialog {
         id: firewallDialog
-        title: i18n("firewalld is not running")
-        subtitle: i18n("firewalld is not running, so the firewall cannot be opened for a single port. While the hotspot is up, the phone that joins it can reach every service on this computer. Turn it on anyway?")
+        title: i18n("Turn on without a firewall?")
+        subtitle: i18n("firewalld is not running, so the firewall cannot be opened for a single port. While the hotspot is up, the phone that joins it can reach every service on this computer")
         standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
         onAccepted: page.core.wifiUpgrade = true
         // The switch was toggled by hand: show the real setting again.
@@ -366,7 +366,7 @@ FormCard.FormCardPage {
     Kirigami.PromptDialog {
         id: resetDialog
         title: i18n("Reset preferences?")
-        subtitle: i18n("Every setting goes back to its default. The history and the paired and trusted devices are kept.")
+        subtitle: i18n("Every setting goes back to its default. The history and the paired and trusted devices are kept")
         standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
         onAccepted: page.core.resetSettings()
     }

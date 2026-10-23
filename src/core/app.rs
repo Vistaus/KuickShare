@@ -6,10 +6,10 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     sync::{
-        Arc, Mutex as StdMutex,
+        Arc, Mutex as StdMutex, Weak,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -18,7 +18,8 @@ use rqs_lib::{
     channel::{ChannelMessage, Message, TransferAction},
 };
 use tokio::{
-    sync::{broadcast, mpsc},
+    net::TcpStream,
+    sync::{Mutex, broadcast, mpsc},
     task::JoinHandle,
 };
 use zbus::Connection;
@@ -39,6 +40,9 @@ pub type TrustedIps = Arc<StdMutex<HashSet<String>>>;
 /// Transfers that have not reached a final state yet.
 pub type ActiveTransfers = Arc<StdMutex<HashMap<String, TransferEvent>>>;
 pub type SharedHistory = Arc<StdMutex<History>>;
+/// Sends that went out under another endpoint id than the one the user picked (original id ->
+/// id used with the library); the transfer events are reported under the original id.
+pub type Redirects = Arc<StdMutex<HashMap<String, String>>>;
 
 struct Engine {
     rqs: RQS,
@@ -46,10 +50,19 @@ struct Engine {
     tasks: Vec<JoinHandle<()>>,
     discovery_tx: broadcast::Sender<EndpointInfo>,
     discovery_on: bool,
+    /// Tasks that restart the mDNS search for a phone seen only over Bluetooth, by device name.
+    lan_retries: HashMap<String, JoinHandle<()>>,
 }
 
 impl Engine {
+    fn stop_lan_retries(&mut self) {
+        for (_, task) in self.lan_retries.drain() {
+            task.abort();
+        }
+    }
+
     async fn stop(mut self) {
+        self.stop_lan_retries();
         for task in &self.tasks {
             task.abort();
         }
@@ -62,6 +75,7 @@ pub struct Core {
     settings_path: Option<PathBuf>,
     engine: Option<Engine>,
     endpoints: Endpoints,
+    redirects: Redirects,
     active: ActiveTransfers,
     history: SharedHistory,
     trust: Arc<Trust>,
@@ -73,6 +87,10 @@ pub struct Core {
     conn: Option<Connection>,
     /// Temporary hiding (not persisted), e.g. while Do Not Disturb is on.
     suspended: bool,
+    /// When the mDNS search was last restarted to look for a phone picked over Bluetooth.
+    last_lan_lookup: Option<Instant>,
+    /// The mutex this core lives in, for the tasks that lock it later (see `set_handle`).
+    handle: Weak<Mutex<Core>>,
 }
 
 impl Core {
@@ -92,6 +110,7 @@ impl Core {
             settings_path,
             engine: None,
             endpoints: Endpoints::default(),
+            redirects: Redirects::default(),
             active: ActiveTransfers::default(),
             history: Arc::new(StdMutex::new(history)),
             trust,
@@ -99,7 +118,14 @@ impl Core {
             trusted_ips: TrustedIps::default(),
             conn: None,
             suspended: false,
+            last_lan_lookup: None,
+            handle: Weak::new(),
         }
+    }
+
+    /// Tells the core which mutex it lives in; needed for `watch_lan`.
+    pub fn set_handle(&mut self, handle: Weak<Mutex<Core>>) {
+        self.handle = handle;
     }
 
     pub async fn start(&mut self, conn: Connection) -> Result<()> {
@@ -122,6 +148,7 @@ impl Core {
         if let Some(engine) = self.engine.take() {
             engine.stop().await;
         }
+        self.redirects.lock().unwrap().clear();
         if self.settings.wifi_upgrade {
             remove_stale_wifi_profiles().await;
         }
@@ -367,13 +394,14 @@ impl Core {
     }
 
     /// Consent and cancel actions travel on the library's own event channel.
-    pub fn send_lib_action(&self, id: &str, action: TransferAction) -> Result<()> {
+    pub fn send_lib_action(&self, id_in: &str, action: TransferAction) -> Result<()> {
         let engine = self.engine.as_ref().context("service is not running")?;
+        let id = self.redirects.lock().unwrap().get(id_in).cloned();
         engine
             .rqs
             .message_sender
             .send(ChannelMessage {
-                id: id.to_owned(),
+                id: id.unwrap_or_else(|| id_in.to_owned()),
                 msg: Message::Lib { action },
             })
             .map(|_| ())
@@ -422,20 +450,34 @@ impl Core {
         if !self.settings.wifi_upgrade {
             return;
         }
+        self.restart_discovery();
+    }
+
+    /// Starts the mDNS search over; the list of devices is not touched (unlike
+    /// `stop_discovery`). Returns false when the discovery is not running or cannot restart.
+    fn restart_discovery(&mut self) -> bool {
         let Some(engine) = self.engine.as_mut() else {
-            return;
+            return false;
         };
         if !engine.discovery_on {
-            return;
+            return false;
         }
-        engine.rqs.stop_discovery();
-        if let Err(e) = engine.rqs.discovery(engine.discovery_tx.clone()) {
-            tracing::warn!("could not restart the discovery after the network came back: {e:#}");
-            engine.discovery_on = false;
+        // Only the mDNS search: restarting the Bluetooth advertisement and scan with it stopped a
+        // scan window in progress ("the discovery ended before the window did").
+        if let Err(e) = engine
+            .rqs
+            .restart_mdns_discovery(engine.discovery_tx.clone())
+        {
+            tracing::warn!("could not restart the mDNS search: {e:#}");
+            return false;
         }
+        true
     }
 
     pub fn stop_discovery(&mut self) {
+        if let Some(engine) = &mut self.engine {
+            engine.stop_lan_retries();
+        }
         if let Some(engine) = &mut self.engine
             && engine.discovery_on
         {
@@ -445,7 +487,7 @@ impl Core {
         self.endpoints.lock().unwrap().clear();
     }
 
-    pub async fn send_files(&self, endpoint_id: &str, paths: Vec<String>) -> Result<()> {
+    pub async fn send_files(&mut self, endpoint_id: &str, paths: Vec<String>) -> Result<()> {
         if paths.is_empty() {
             bail!("no files to send");
         }
@@ -455,7 +497,7 @@ impl Core {
         self.send(endpoint_id, OutboundPayload::Files(paths)).await
     }
 
-    pub async fn send_text(&self, endpoint_id: &str, text: String, url: bool) -> Result<()> {
+    pub async fn send_text(&mut self, endpoint_id: &str, text: String, url: bool) -> Result<()> {
         if text.trim().is_empty() {
             bail!("nothing to send");
         }
@@ -468,15 +510,19 @@ impl Core {
             .await
     }
 
-    async fn send(&self, endpoint_id: &str, ob: OutboundPayload) -> Result<()> {
-        let engine = self.engine.as_ref().context("service is not running")?;
-        let endpoint = self
+    async fn send(&mut self, endpoint_id: &str, ob: OutboundPayload) -> Result<()> {
+        if self.engine.is_none() {
+            bail!("service is not running");
+        }
+        let picked = self
             .endpoints
             .lock()
             .unwrap()
             .get(endpoint_id)
             .cloned()
             .with_context(|| format!("unknown device {endpoint_id}"))?;
+        let endpoint = self.choose_route(picked).await?;
+        let engine = self.engine.as_ref().context("service is not running")?;
         let ble = endpoint.ble.is_some();
         if ble && !self.settings.wifi_upgrade {
             bail!("Sending over Bluetooth needs the Wi-Fi upgrade, which is off (see Settings)");
@@ -503,27 +549,221 @@ impl Core {
                 endpoint.port.unwrap_or_default()
             )
         };
-        // The library only logs a failed scan or dial: without any event in time, tell the user.
-        let watch = if let (true, Some(conn)) = (ble, &self.conn) {
-            Some((conn.clone(), engine.rqs.message_sender.subscribe()))
-        } else {
-            None
-        };
+        // Safety net: without any event in time, tell the user. The library reports a failed
+        // scan, dial, connect or handshake itself, so this only covers a hang.
+        let watch = self
+            .conn
+            .as_ref()
+            .map(|conn| (conn.clone(), engine.rqs.message_sender.subscribe()));
         let send_info = SendInfo {
             id: endpoint.id.clone(),
             name: name.clone(),
             addr,
             ob,
         };
-        engine
-            .send_tx
-            .send(send_info)
-            .await
-            .context("service stopped while sending")?;
+        // Only a send that is really going out is mapped, and no two picked ids share one
+        // library id.
+        {
+            let mut redirects = self.redirects.lock().unwrap();
+            redirects.retain(|_, sent_as| *sent_as != endpoint.id);
+            redirects.remove(endpoint_id);
+            if endpoint.id != endpoint_id {
+                redirects.insert(endpoint_id.to_owned(), endpoint.id.clone());
+            }
+        }
+        if let Err(e) = engine.send_tx.send(send_info).await {
+            self.redirects.lock().unwrap().remove(endpoint_id);
+            return Err(e).context("service stopped while sending");
+        }
         if let Some((conn, events)) = watch {
-            tokio::spawn(report_silent_send(conn, events, endpoint.id, name));
+            let within = if ble {
+                BLE_START_TIMEOUT
+            } else {
+                LAN_START_TIMEOUT
+            };
+            tokio::spawn(report_silent_send(
+                conn,
+                events,
+                (endpoint.id, endpoint_id.to_owned()),
+                name,
+                within,
+            ));
         }
         Ok(())
+    }
+
+    /// Decides which endpoint a send really goes to. A device found over the LAN is probed first:
+    /// a phone whose Wi-Fi went off sends no mDNS goodbye, so its entry would stay for minutes.
+    /// If it is gone the entry is dropped and the same phone is tried over Bluetooth; the other
+    /// way round, a Bluetooth phone that answers on the LAN is reached there. When no LAN entry
+    /// is known for a Bluetooth phone, the mDNS search is restarted once and given
+    /// `LAN_LOOKUP_TIMEOUT` to find it (see `look_up_lan`). The other way round, when a LAN phone
+    /// is gone and no Bluetooth entry is known, a Bluetooth scan window is started and given
+    /// `BLE_LOOKUP_TIMEOUT` to see it (see `look_up_bluetooth`). The `Core` lock is held by the
+    /// caller meanwhile: for a Bluetooth pick at most `LAN_LOOKUP_TIMEOUT` (1.5 s) plus
+    /// `PROBE_TIMEOUT` (1.5 s) per probed candidate; for a LAN pick at most `PROBE_TIMEOUT`
+    /// (1.5 s) plus `BLE_LOOKUP_TIMEOUT` (3 s).
+    async fn choose_route(&mut self, picked: EndpointInfo) -> Result<EndpointInfo> {
+        if picked.ble.is_none() {
+            if probe(&lan_addr(&picked)).await {
+                return Ok(picked);
+            }
+            self.endpoints.lock().unwrap().remove(&picked.id);
+            if let Some(conn) = &self.conn {
+                dbus::emit_device_lost(conn, &picked.id).await;
+            }
+            let mut ble = None;
+            if self.settings.wifi_upgrade {
+                ble = self.same_device(&picked, true);
+                if ble.is_none() {
+                    tracing::info!("{} is gone: looking for it over Bluetooth", picked.id);
+                    ble = self.look_up_bluetooth(&picked).await;
+                }
+            }
+            let Some(ble) = ble else {
+                if self.settings.wifi_upgrade {
+                    tracing::info!("{} is gone and has no Bluetooth entry", picked.id);
+                } else {
+                    tracing::info!(
+                        "{} is gone (Wi-Fi Direct is off: no Bluetooth lookup)",
+                        picked.id
+                    );
+                }
+                bail!("The device is not reachable");
+            };
+            tracing::info!("{} is gone, sending to {} (same name)", picked.id, ble.id);
+            return Ok(ble);
+        }
+        let mut lan = self.same_device(&picked, false);
+        if lan.is_none() && self.settings.wifi_upgrade && self.lan_entries(&picked) == 0 {
+            lan = self.look_up_lan(&picked).await;
+        }
+        let name = picked.name.as_deref().unwrap_or_default();
+        match lan {
+            Some(lan) if probe(&lan_addr(&lan)).await => {
+                tracing::info!(
+                    "{} answers on the LAN, sending to {} (same name)",
+                    picked.id,
+                    lan.id
+                );
+                return Ok(lan);
+            }
+            Some(_) => tracing::info!(
+                "{} stays on Bluetooth: the LAN entry did not answer",
+                picked.id
+            ),
+            None if self.lan_entries(&picked) > 1 => tracing::info!(
+                "{} stays on Bluetooth: more than one LAN entry has that name",
+                picked.id
+            ),
+            None => tracing::info!(
+                "{} stays on Bluetooth: no LAN entry named \"{name}\"",
+                picked.id
+            ),
+        }
+        Ok(picked)
+    }
+
+    /// A phone was seen over Bluetooth only: restarts the mDNS search every `LAN_RETRY_EVERY`, at
+    /// most `LAN_RETRIES` times, until its LAN entry is known (the phone answers the first
+    /// queries late). One task per device name; it ends with the discovery or the engine.
+    pub fn watch_lan(&mut self, ble: EndpointInfo) {
+        let Some(name) = ble.name.clone() else {
+            return;
+        };
+        if !self.settings.wifi_upgrade || !self.lan_retry_wanted(&ble) {
+            return;
+        }
+        let handle = self.handle.clone();
+        let Some(engine) = self.engine.as_mut().filter(|e| e.discovery_on) else {
+            return;
+        };
+        if engine
+            .lan_retries
+            .get(&name)
+            .is_some_and(|t| !t.is_finished())
+        {
+            return;
+        }
+        engine
+            .lan_retries
+            .insert(name, tokio::spawn(retry_lan(handle, ble)));
+    }
+
+    /// True while `ble` is still listed and has no LAN entry.
+    fn lan_retry_wanted(&self, ble: &EndpointInfo) -> bool {
+        let endpoints = self.endpoints.lock().unwrap();
+        endpoints.contains_key(&ble.id) && needs_lan_retry(endpoints.values(), ble)
+    }
+
+    /// Restarts the mDNS search (the list stays) and waits up to `LAN_LOOKUP_TIMEOUT` for the
+    /// phone picked over Bluetooth to show up on the LAN with the same name and device type. The
+    /// library notices a phone that joined the LAN only when the phone announces itself, and
+    /// NetworkManager reports nothing when it is the phone's network that changed. At most one
+    /// restart per `LAN_LOOKUP_GAP`; nothing happens while the discovery is not running. No
+    /// std mutex guard is held across the waits.
+    async fn look_up_lan(&mut self, picked: &EndpointInfo) -> Option<EndpointInfo> {
+        picked.name.as_ref()?;
+        let now = Instant::now();
+        if !lookup_due(self.last_lan_lookup, now) || !self.restart_discovery() {
+            return None;
+        }
+        self.last_lan_lookup = Some(now);
+        tracing::info!(
+            "{} is not on the LAN list: restarting the search",
+            picked.id
+        );
+        let deadline = tokio::time::Instant::now() + LAN_LOOKUP_TIMEOUT;
+        loop {
+            tokio::time::sleep(LAN_LOOKUP_POLL).await;
+            if let Some(lan) = self.same_device(picked, false) {
+                return Some(lan);
+            }
+            if tokio::time::Instant::now() >= deadline || self.lan_entries(picked) > 1 {
+                return None;
+            }
+        }
+    }
+
+    /// Starts a Bluetooth scan window and waits up to `BLE_LOOKUP_TIMEOUT` for the phone picked
+    /// over the LAN to be seen with the same name and device type. `scan_bluetooth` does nothing
+    /// while a window runs or just after one; a running window delivers its sightings to the same
+    /// list, so waiting is still right. Stops early on a match, or when several phones match (no
+    /// guessing). No std mutex guard is held across the waits.
+    async fn look_up_bluetooth(&mut self, picked: &EndpointInfo) -> Option<EndpointInfo> {
+        picked.name.as_ref()?;
+        if let Err(e) = self.scan_bluetooth() {
+            tracing::debug!("Bluetooth lookup: no scan started: {e:#}");
+        }
+        let deadline = tokio::time::Instant::now() + BLE_LOOKUP_TIMEOUT;
+        loop {
+            tokio::time::sleep(BLE_LOOKUP_POLL).await;
+            if let Some(ble) = self.same_device(picked, true) {
+                return Some(ble);
+            }
+            if tokio::time::Instant::now() >= deadline || self.ble_entries(picked) > 1 {
+                return None;
+            }
+        }
+    }
+
+    /// How many known Bluetooth endpoints have the name and the device type of `of`.
+    fn ble_entries(&self, of: &EndpointInfo) -> usize {
+        let endpoints = self.endpoints.lock().unwrap();
+        matching(endpoints.values(), of, true).count()
+    }
+
+    /// How many known LAN endpoints have the name and the device type of `of`.
+    fn lan_entries(&self, of: &EndpointInfo) -> usize {
+        let endpoints = self.endpoints.lock().unwrap();
+        matching(endpoints.values(), of, false).count()
+    }
+
+    /// The only known Bluetooth (`ble`) or LAN endpoint with the name and the device type of
+    /// `of`; `None` when there is none or when more than one matches (no guessing).
+    fn same_device(&self, of: &EndpointInfo, ble: bool) -> Option<EndpointInfo> {
+        let endpoints = self.endpoints.lock().unwrap();
+        unique_match(endpoints.values(), of, ble).cloned()
     }
 
     fn ensure_idle(&self) -> Result<()> {
@@ -561,6 +801,7 @@ impl Core {
         if let Some(engine) = self.engine.take() {
             engine.stop().await;
         }
+        self.redirects.lock().unwrap().clear();
         self.endpoints.lock().unwrap().clear();
         self.start_engine(discovery).await
     }
@@ -584,6 +825,7 @@ impl Core {
             dbus::Forwarding {
                 connection: conn,
                 endpoints: self.endpoints.clone(),
+                redirects: self.redirects.clone(),
                 active: self.active.clone(),
                 history: self.history.clone(),
                 trust: self.trust.clone(),
@@ -591,6 +833,7 @@ impl Core {
                 allowed: self.allowed.clone(),
                 trusted_enabled: self.trusted_enabled.clone(),
                 lib_sender: rqs.message_sender.clone(),
+                core: self.handle.clone(),
             },
             rqs.message_sender.subscribe(),
             discovery_tx.subscribe(),
@@ -601,6 +844,7 @@ impl Core {
             tasks,
             discovery_tx,
             discovery_on: false,
+            lan_retries: HashMap::new(),
         });
         if discovery {
             self.start_discovery()?;
@@ -630,6 +874,108 @@ fn take_lan_endpoints(endpoints: &mut HashMap<String, EndpointInfo>) -> Vec<Stri
     lan
 }
 
+/// The endpoints of `candidates` on the wanted route that have the name and the device type of
+/// `of`; none when `of` is unnamed.
+fn matching<'a, 'b>(
+    candidates: impl Iterator<Item = &'a EndpointInfo>,
+    of: &'b EndpointInfo,
+    ble: bool,
+) -> impl Iterator<Item = &'a EndpointInfo> {
+    candidates.filter(move |e| {
+        of.name.is_some()
+            && e.ble.is_some() == ble
+            && e.id != of.id
+            && e.name == of.name
+            && e.rtype == of.rtype
+    })
+}
+
+/// The only endpoint of `candidates` on the wanted route (`ble` or LAN) that has the name and the
+/// device type of `of`. An unnamed device never matches.
+fn unique_match<'a>(
+    candidates: impl Iterator<Item = &'a EndpointInfo>,
+    of: &EndpointInfo,
+    ble: bool,
+) -> Option<&'a EndpointInfo> {
+    let mut found = matching(candidates, of, ble);
+    let first = found.next()?;
+    found.next().is_none().then_some(first)
+}
+
+/// `ip:port` of a device found over the LAN.
+fn lan_addr(endpoint: &EndpointInfo) -> String {
+    format!(
+        "{}:{}",
+        endpoint.ip.as_deref().unwrap_or_default(),
+        endpoint.port.as_deref().unwrap_or_default()
+    )
+}
+
+/// How long a send waits for the device to accept a TCP connection before it is taken to be gone.
+const PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// How long a send to a Bluetooth phone waits for it to appear on the LAN after the mDNS search
+/// was restarted, and how often the list is looked at meanwhile.
+const LAN_LOOKUP_TIMEOUT: Duration = Duration::from_millis(1500);
+const LAN_LOOKUP_POLL: Duration = Duration::from_millis(100);
+/// How long a send to a vanished LAN phone waits for a Bluetooth scan to see it, and how often
+/// the list is looked at meanwhile.
+const BLE_LOOKUP_TIMEOUT: Duration = Duration::from_millis(3000);
+const BLE_LOOKUP_POLL: Duration = Duration::from_millis(100);
+/// Least time between two restarts of the search for that purpose, so repeated sends do not
+/// thrash the discovery.
+const LAN_LOOKUP_GAP: Duration = Duration::from_secs(5);
+
+/// True when the search may be restarted again, `last` being the previous restart.
+fn lookup_due(last: Option<Instant>, now: Instant) -> bool {
+    last.is_none_or(|last| now.saturating_duration_since(last) >= LAN_LOOKUP_GAP)
+}
+
+/// Time between two restarts of the search for a phone seen only over Bluetooth, and how many
+/// there are per sighting.
+const LAN_RETRY_EVERY: Duration = Duration::from_secs(5);
+const LAN_RETRIES: u32 = 4;
+
+/// True when `ble` is a named Bluetooth sighting and none of `endpoints` is a LAN entry with its
+/// name and device type.
+pub fn needs_lan_retry<'a>(
+    endpoints: impl Iterator<Item = &'a EndpointInfo>,
+    ble: &EndpointInfo,
+) -> bool {
+    ble.present == Some(true)
+        && ble.ble.is_some()
+        && ble.name.is_some()
+        && matching(endpoints, ble, false).next().is_none()
+}
+
+/// Body of the task started by `Core::watch_lan`. The core is locked only for the check and the
+/// restart, never across the sleeps; the restart shares `last_lan_lookup` with the send.
+async fn retry_lan(core: Weak<Mutex<Core>>, ble: EndpointInfo) {
+    for _ in 0..LAN_RETRIES {
+        tokio::time::sleep(LAN_RETRY_EVERY).await;
+        let Some(core) = core.upgrade() else {
+            return;
+        };
+        let mut core = core.lock().await;
+        if !core.lan_retry_wanted(&ble) {
+            return;
+        }
+        let now = Instant::now();
+        if lookup_due(core.last_lan_lookup, now) && core.restart_discovery() {
+            core.last_lan_lookup = Some(now);
+            tracing::info!("{} has no LAN entry yet: restarting the search", ble.id);
+        }
+    }
+}
+
+/// True when `addr` accepts a TCP connection within `PROBE_TIMEOUT`.
+async fn probe(addr: &str) -> bool {
+    matches!(
+        tokio::time::timeout(PROBE_TIMEOUT, TcpStream::connect(addr)).await,
+        Ok(Ok(_))
+    )
+}
+
 /// Follows NetworkManager: `Core::network_lost` when the last connection drops and
 /// `Core::network_gained` when one comes back.
 pub async fn watch_network(core: Arc<tokio::sync::Mutex<Core>>) {
@@ -647,19 +993,25 @@ pub async fn watch_network(core: Arc<tokio::sync::Mutex<Core>>) {
 /// for the phone's first frame. The library reports a failure itself; this only covers a hang.
 const BLE_START_TIMEOUT: Duration = Duration::from_secs(40);
 
-/// Waits for the first event of the transfer `id`; if none comes in time, the scan or the dial
-/// failed (the library only logs that) and the transfer is reported as failed.
+/// A LAN send connects within 8 s and finishes the handshake within 20 s (both enforced by the
+/// library, which reports the failure); this only covers a hang. Below the shell's own 45 s.
+const LAN_START_TIMEOUT: Duration = Duration::from_secs(40);
+
+/// Waits for the first event of the transfer sent under `ids.0` (the id used with the library);
+/// if none comes in time it is reported as failed under `ids.1` (the id the user picked).
 async fn report_silent_send(
     conn: Connection,
     mut events: broadcast::Receiver<ChannelMessage>,
-    id: String,
+    ids: (String, String),
     device: String,
+    within: Duration,
 ) {
-    if send_started(&mut events, &id, BLE_START_TIMEOUT).await {
+    let (sent_as, shown_as) = ids;
+    if send_started(&mut events, &sent_as, within).await {
         return;
     }
-    tracing::info!("no answer from {id}: reporting the Bluetooth send as failed");
-    dbus::emit_failed_transfer(&conn, &id, &device).await;
+    tracing::info!("no answer from {sent_as}: reporting the send as failed");
+    dbus::emit_failed_transfer(&conn, &shown_as, &device).await;
 }
 
 /// True when the transfer `id` produced an event within `within`, or when the service stopped
@@ -741,6 +1093,64 @@ mod tests {
         let mut endpoints = HashMap::from([(lan.id.clone(), lan), (ble.id.clone(), ble)]);
         assert_eq!(take_lan_endpoints(&mut endpoints), ["10.0.0.5:4000"]);
         assert_eq!(endpoints.keys().collect::<Vec<_>>(), ["ble:G483"]);
+    }
+
+    fn named(id: &str, name: &str, ble: bool) -> EndpointInfo {
+        EndpointInfo {
+            id: id.into(),
+            name: Some(name.into()),
+            ble: ble.then_some(BleTarget {
+                endpoint_id: *b"G483",
+            }),
+            ..EndpointInfo::default()
+        }
+    }
+
+    #[test]
+    fn the_same_phone_is_found_on_the_other_route_only_when_it_is_unambiguous() {
+        let lan = named("10.0.0.5:4000", "Pixel", false);
+        let ble = named("ble:G483", "Pixel", true);
+        let other = named("ble:ABCD", "Galaxy", true);
+        let all = [lan.clone(), ble.clone(), other.clone()];
+        assert_eq!(
+            unique_match(all.iter(), &lan, true).map(|e| &e.id),
+            Some(&ble.id)
+        );
+        assert_eq!(
+            unique_match(all.iter(), &ble, false).map(|e| &e.id),
+            Some(&lan.id)
+        );
+
+        let twin = named("10.0.0.6:4000", "Pixel", false);
+        let all = [lan.clone(), ble.clone(), twin];
+        assert!(unique_match(all.iter(), &ble, false).is_none());
+
+        let unnamed = EndpointInfo::default();
+        assert!(unique_match([ble.clone()].iter(), &unnamed, true).is_none());
+    }
+
+    #[test]
+    fn a_bluetooth_sighting_without_a_lan_entry_needs_a_retry() {
+        let mut ble = named("ble:G483", "Pixel", true);
+        ble.present = Some(true);
+        let lan = named("10.0.0.5:4000", "Pixel", false);
+        let other = named("10.0.0.6:4000", "Galaxy", false);
+        assert!(needs_lan_retry([ble.clone(), other.clone()].iter(), &ble));
+        assert!(!needs_lan_retry([ble.clone(), lan.clone()].iter(), &ble));
+        assert!(!needs_lan_retry(
+            [lan].iter(),
+            &named("10.0.0.5:4000", "Pixel", false)
+        ));
+        ble.present = Some(false);
+        assert!(!needs_lan_retry([other].iter(), &ble));
+    }
+
+    #[test]
+    fn the_search_restarts_at_most_once_per_gap() {
+        let t0 = Instant::now();
+        assert!(lookup_due(None, t0));
+        assert!(!lookup_due(Some(t0), t0 + Duration::from_secs(4)));
+        assert!(lookup_due(Some(t0), t0 + LAN_LOOKUP_GAP));
     }
 
     #[test]

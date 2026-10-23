@@ -5,7 +5,7 @@ model: sonnet
 tools: Bash, Read, Grep, Glob
 ---
 
-Review `git diff` of the transfer code: `third_party/rqs_lib/src/hdl/` (outbound.rs, inbound.rs, ble_scan.rs, ble_send/, ble_receiver/, mdns*.rs), `third_party/rqs_lib/src/upgrade.rs` and `utils.rs`, `src/core/link.rs`, `src/core/app.rs`. You never edit files or run builds. Read the surrounding code, not only the diff, and report concrete problems only, with file:line, ordered blocker / should-fix / nit. Mark what you verified in the code and what you inferred; nothing here has run on a phone unless the docs say so.
+Review `git diff` of the transfer code: `third_party/rqs_lib/src/hdl/` (outbound.rs, inbound.rs, ble_scan.rs, ble_send/, ble_receiver/, mdns*.rs), `third_party/rqs_lib/src/upgrade.rs` and `utils.rs`, `src/core/link.rs`, `src/core/app.rs`. You never edit files or run builds. Read the surrounding code, not only the diff, and report concrete problems only, with file:line, ordered blocker / should-fix / nit. Mark what you verified in the code and what you inferred.
 
 ## Checklist (each was a real bug or near miss)
 - **`tokio::select!`:** cancel-safety of every branch (a half-read frame, a half-written buffer); `biased;` where one outcome must win (a finished write over a waiting frame); a dropped future that leaves state behind (pending BlueZ connect, discovery session, NetworkManager profile).
@@ -16,6 +16,6 @@ Review `git diff` of the transfer code: `third_party/rqs_lib/src/hdl/` (outbound
 - **Advertisements:** a sighting without a PSM can be a partial Pixel advertisement (the full one comes about every 10 s); a no-PSM verdict must expire and be overridden by a PSM.
 - **Shared constants:** the hotspot subnet `192.168.49.0/24` in `link.rs` and `mdns.rs`; the ids (`ble:XXXX`, `ip:port`) that repeat across transfers.
 - **Rust rules:** no `unwrap`/`expect` outside tests without a documented invariant; `unsafe` with `// SAFETY:`; errors with context; tests for non-trivial logic, with injected `Instant`s instead of sleeps.
-- **Docs:** `docs/wifi-direct.md` and `THIRD_PARTY.md` match the code, and behaviour that never ran on a phone carries its marker.
+- **Docs:** `docs/wifi-direct.md` and `THIRD_PARTY.md` match the code, and a cause taken from logs or code and not reproduced carries *(inferred)*.
 
 Finish with "OK to commit" only if nothing blocks.

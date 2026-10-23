@@ -45,6 +45,7 @@ async fn main() -> Result<()> {
         trust,
         trust_rx,
     )));
+    core.lock().await.set_handle(Arc::downgrade(&core));
     let connection = dbus::serve(core.clone()).await?;
     core.lock().await.start(connection).await?;
     tokio::spawn(app::watch_network(core.clone()));

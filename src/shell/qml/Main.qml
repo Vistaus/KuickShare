@@ -103,7 +103,7 @@ Kirigami.ApplicationWindow {
     Kirigami.PromptDialog {
         id: quitDialog
         title: i18n("Quit KuickShare?")
-        subtitle: i18n("A transfer is in progress. Quitting stops it.")
+        subtitle: i18n("A transfer is in progress. Quitting stops it")
         standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
         onAccepted: Qt.quit()
     }
@@ -144,7 +144,24 @@ Kirigami.ApplicationWindow {
     Connections {
         target: root.core
         function onErrorOccurred(message) {
-            root.showPassiveNotification(message, "long");
+            toasts.show(Kirigami.MessageType.Error, message, 10000);
+        }
+        // How a transfer ended, as a toast on whatever page is open: green for success, red for a
+        // failure, blue otherwise.
+        function onTransferEnded(id, state) {
+            switch (state) {
+            case "Finished":
+                toasts.show(Kirigami.MessageType.Positive, i18n("Transfer completed"), 4000);
+                break;
+            case "Disconnected":
+                toasts.show(Kirigami.MessageType.Error, i18n("The transfer failed"), 10000);
+                break;
+            case "Rejected":
+                toasts.show(Kirigami.MessageType.Information, i18n("The transfer was declined"), 6000);
+                break;
+            default:
+                toasts.show(Kirigami.MessageType.Information, i18n("The transfer was cancelled"), 6000);
+            }
         }
     }
 
@@ -321,6 +338,7 @@ Kirigami.ApplicationWindow {
         id: transfersPage
         TransfersPage {
             core: root.core
+            toasts: toasts
         }
     }
     Component {
@@ -381,6 +399,10 @@ Kirigami.ApplicationWindow {
     Shortcut {
         sequences: [StandardKey.Close]
         onActivated: root.close()
+    }
+
+    ToastStack {
+        id: toasts
     }
 
     // The sharing service is not running (it stopped, or never started): offer to start it.

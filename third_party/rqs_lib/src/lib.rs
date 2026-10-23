@@ -91,6 +91,9 @@ pub struct RQS {
     // Discovery token is different than ctoken because he is on his own
     // - can be cancelled while the ctoken is still active
     discovery_ctk: Option<CancellationToken>,
+    /// The mDNS search alone, a child of `discovery_ctk`: it can be restarted without touching the
+    /// Bluetooth advertisement and scan of the same discovery.
+    mdns_ctk: Option<CancellationToken>,
 
     // Used to trigger a change in the mDNS visibility (and later on, BLE)
     pub visibility_sender: Arc<Mutex<watch::Sender<Visibility>>>,
@@ -140,6 +143,7 @@ impl RQS {
             tracker: None,
             ctoken: None,
             discovery_ctk: None,
+            mdns_ctk: None,
             visibility_sender: Arc::new(Mutex::new(visibility_sender)),
             visibility_receiver,
             port_number,
@@ -245,8 +249,36 @@ impl RQS {
         spawn_ble_scan(tracker, ctk.clone(), sender.clone());
 
         let discovery = MDnsDiscovery::new(sender)?;
-        tracker.spawn(async move { discovery.run(ctk.clone()).await });
+        let mdns_ctk = ctk.child_token();
+        self.mdns_ctk = Some(mdns_ctk.clone());
+        tracker.spawn(async move { discovery.run(mdns_ctk).await });
 
+        Ok(())
+    }
+
+    /// Starts the mDNS search over (its queries go out at once; the library would notice a new
+    /// device on its own only when it announces itself). The Bluetooth advertisement and scan of the
+    /// running discovery keep going: restarting them stops the scan window in progress.
+    pub fn restart_mdns_discovery(
+        &mut self,
+        sender: broadcast::Sender<EndpointInfo>,
+    ) -> Result<(), anyhow::Error> {
+        let tracker = self
+            .tracker
+            .as_ref()
+            .ok_or_else(|| anyhow!("The service wasn't first started"))?;
+        let parent = self
+            .discovery_ctk
+            .as_ref()
+            .ok_or_else(|| anyhow!("The discovery is not running"))?;
+
+        if let Some(old) = self.mdns_ctk.take() {
+            old.cancel();
+        }
+        let discovery = MDnsDiscovery::new(sender)?;
+        let mdns_ctk = parent.child_token();
+        self.mdns_ctk = Some(mdns_ctk.clone());
+        tracker.spawn(async move { discovery.run(mdns_ctk).await });
         Ok(())
     }
 

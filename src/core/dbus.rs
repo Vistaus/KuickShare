@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     net::SocketAddr,
     sync::{
-        Arc, Mutex as StdMutex,
+        Arc, Mutex as StdMutex, Weak,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -27,7 +27,9 @@ use zbus::{
 
 use crate::{
     allowed::{self, Allowed},
-    app::{ActiveTransfers, Core, Endpoints, SharedHistory, TrustedIps},
+    app::{
+        ActiveTransfers, Core, Endpoints, Redirects, SharedHistory, TrustedIps, needs_lan_retry,
+    },
     history::{self, HistoryEntry},
     safety,
     trust::{self, Trust, TrustEvent},
@@ -90,13 +92,13 @@ impl Service {
     }
 
     async fn send_files(&self, device_id: &str, paths: Vec<String>) -> fdo::Result<()> {
-        let core = self.core.lock().await;
+        let mut core = self.core.lock().await;
         core.send_files(device_id, paths).await.map_err(failed)
     }
 
     /// `kind` is "text" or "url".
     async fn send_text(&self, device_id: &str, text: String, kind: &str) -> fdo::Result<()> {
-        let core = self.core.lock().await;
+        let mut core = self.core.lock().await;
         core.send_text(device_id, text, kind == "url")
             .await
             .map_err(failed)
@@ -520,6 +522,7 @@ async fn interface_ref(connection: &Connection) -> zbus::Result<InterfaceRef<Ser
 pub struct Forwarding {
     pub connection: Connection,
     pub endpoints: Endpoints,
+    pub redirects: Redirects,
     pub active: ActiveTransfers,
     pub history: SharedHistory,
     pub trust: Arc<Trust>,
@@ -527,6 +530,7 @@ pub struct Forwarding {
     pub allowed: Allowed,
     pub trusted_enabled: Arc<AtomicBool>,
     pub lib_sender: broadcast::Sender<ChannelMessage>,
+    pub core: Weak<Mutex<Core>>,
 }
 
 /// Re-emits library events (transfers, discovered devices) as D-Bus signals.
@@ -543,6 +547,7 @@ pub fn spawn_forwarders(
             shared.endpoints,
             shared.trust,
             shared.trusted_ips,
+            shared.core,
         )),
     ]
 }
@@ -551,6 +556,7 @@ async fn forward_transfers(shared: Forwarding, mut events: broadcast::Receiver<C
     let Forwarding {
         connection,
         endpoints,
+        redirects,
         active,
         history,
         trust,
@@ -562,7 +568,7 @@ async fn forward_transfers(shared: Forwarding, mut events: broadcast::Receiver<C
     // Transfers waiting for an answer: each is declined if nobody answers in time.
     let mut consent_timers: HashMap<String, JoinHandle<()>> = HashMap::new();
     loop {
-        let message = match events.recv().await {
+        let mut message = match events.recv().await {
             Ok(message) => message,
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 tracing::warn!("dropped {n} transfer events");
@@ -570,6 +576,15 @@ async fn forward_transfers(shared: Forwarding, mut events: broadcast::Receiver<C
             }
             Err(broadcast::error::RecvError::Closed) => return,
         };
+        // A send that was redirected to another route is reported under the id the user picked.
+        if let Some(picked) = redirects
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|(picked, sent_as)| (*sent_as == message.id).then(|| picked.clone()))
+        {
+            message.id = picked;
+        }
         let Message::Client(client) = &message.msg else {
             continue;
         };
@@ -663,6 +678,7 @@ async fn forward_transfers(shared: Forwarding, mut events: broadcast::Receiver<C
         if let Some(state) = &client.state {
             let mut active = active.lock().unwrap();
             if is_final(state) {
+                redirects.lock().unwrap().remove(&message.id);
                 // Only the first final state counts (Finished may be followed by Disconnected).
                 if let Some(mut snapshot) = active.remove(&message.id) {
                     snapshot.merge(&event);
@@ -782,6 +798,7 @@ async fn forward_devices(
     endpoints: Endpoints,
     trust: Arc<Trust>,
     trusted_ips: TrustedIps,
+    core: Weak<Mutex<Core>>,
 ) {
     let presence = Arc::new(StdMutex::new(Presence::default()));
     let mut probed: HashMap<String, Instant> = HashMap::new();
@@ -814,6 +831,15 @@ async fn forward_devices(
             };
             if let Err(e) = emitted.await {
                 tracing::warn!("failed to emit DeviceFound: {e}");
+            }
+
+            // A phone seen only over Bluetooth: ask the core to keep searching the LAN. Spawned,
+            // because a send may hold the core while it waits for this very loop to list the phone.
+            if needs_lan_retry(endpoints.lock().unwrap().values(), &endpoint)
+                && let Some(core) = core.upgrade()
+            {
+                let ble = endpoint.clone();
+                tokio::spawn(async move { core.lock().await.watch_lan(ble) });
             }
 
             // Is it a computer running KuickShare? Android rotates its announcements often: probe

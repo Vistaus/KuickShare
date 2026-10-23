@@ -20,13 +20,20 @@ KuickShare is GPL-3.0-or-later (see [LICENSE](LICENSE)). It builds on the projec
 | Bluetooth receiver (new) | `src/hdl/ble_receiver/`, `src/hdl/mod.rs`, `src/lib.rs` |
 | Bluetooth sender: windowed scan, L2CAP dial and bridge, BLE endpoints in `EndpointInfo` and `SendInfo` (new) | `src/hdl/ble_scan.rs`, `src/hdl/ble_send/`, `src/lib.rs`, `src/manager.rs`, `src/hdl/mdns_discovery.rs` |
 | BLE scanner removed (`src/hdl/ble.rs`, `btleplug`); periodic mDNS re-announce instead | `src/hdl/mdns.rs`, `src/lib.rs`, `Cargo.toml` |
-| mDNS ignores the hotspot subnet; a send reads the phone's cancel or disconnection while it writes; a phone known to advertise no PSM is dialled over GATT at once; a pending BLE connect is cancelled when a dial ends | `src/hdl/mdns.rs`, `src/hdl/mdns_discovery.rs`, `src/hdl/outbound.rs`, `src/utils.rs`, `src/hdl/ble_scan.rs`, `src/hdl/ble_send/` |
+| Four fixes:<br>- mDNS ignores the hotspot subnet<br>- a send reads the phone's cancel or disconnection while it writes<br>- a phone known to advertise no PSM is dialled over GATT at once<br>- a pending BLE connect is cancelled when a dial ends | `src/hdl/mdns.rs`, `src/hdl/mdns_discovery.rs`, `src/hdl/outbound.rs`, `src/utils.rs`, `src/hdl/ble_scan.rs`, `src/hdl/ble_send/` |
 | Per-chunk logs lowered to `trace` | `src/hdl/inbound.rs`, `src/hdl/outbound.rs` |
 | Formatting only | `src/hdl/mdns_discovery.rs`, `src/hdl/blea.rs` (comment) |
 
 ## System software and bundled libraries
 
-The tarball installer and the Flatpak runtime-less parts use these from the host (the installer checks that they are present). The **AppImage ships them**: it bundles Qt 6, KDE Frameworks 6, Kirigami, the Plasma platform theme, the Breeze icons, glibc and the other libraries the two binaries load (built from Arch Linux packages by `quick-sharun`, see [`build/build-appimage.sh`](build/build-appimage.sh)), so their licenses apply to that file too (mostly LGPL, which allows relinking: the libraries are separate files inside the AppImage and can be replaced after `--appimage-extract`; the full list of bundled files is `find squashfs-root` after extracting). The Flatpak uses the KDE runtime instead.
+These are used from the host by the tarball installer (it checks that they are present) and by the Flatpak's runtime-less parts. The Flatpak uses the KDE runtime instead.
+
+The **AppImage ships them**, so their licenses apply to that file too:
+
+- It bundles Qt 6, KDE Frameworks 6, Kirigami, the Plasma platform theme, the Breeze icons, glibc and the other libraries the two binaries load.
+- They are built from Arch Linux packages by `quick-sharun`, see [`build/build-appimage.sh`](build/build-appimage.sh).
+- Most are LGPL, which allows relinking: the libraries are separate files inside the AppImage and can be replaced after `--appimage-extract`.
+- The full list of bundled files is `find squashfs-root` after extracting.
 
 | Software | License |
 | --- | --- |

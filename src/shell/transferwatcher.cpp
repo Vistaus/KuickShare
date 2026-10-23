@@ -49,7 +49,7 @@ void TransferWatcher::onSendRequested(const QString &id, const QString &device, 
     auto *job = new TransferJob(id, true, device, this);
     connect(job, &TransferJob::cancelRequested, m_core, &CoreBridge::cancel);
     job->setSummary(i18np("%1 file", "%1 files", files));
-    job->setStatus(id.startsWith(QLatin1String("ble:")) ? i18n("Looking for the device…") : i18n("Connecting…"));
+    job->setStatus(id.startsWith(QLatin1String("ble:")) ? i18n("Looking for the device…") : i18n("Connecting…"), true);
     m_tracker.registerJob(job);
     job->start();
     tracked.job = job;
@@ -103,7 +103,7 @@ void TransferWatcher::onTransferChanged(const QString &id)
     // The step a send is in until the files start to move.
     if (outbound && tracked.job && !tracked.started && !TransferModel::isFinal(state))
     {
-        tracked.job->setStatus(state == QLatin1String("SentIntroduction") ? i18n("Waiting for the other device to accept") : i18n("Connecting…"));
+        tracked.job->setStatus(state == QLatin1String("SentIntroduction") ? i18n("Waiting for the other device to accept") : i18n("Connecting…"), true);
     }
 
     // Text and links are tiny: only real file transfers get a progress job.
@@ -180,7 +180,7 @@ void TransferWatcher::onTransferChanged(const QString &id)
         // The library reports a refusal by the other device as "Disconnected"; before any data
         // moved that is the most likely reason (it can also be a full disk or a timeout).
         const QString reason = id.startsWith(QLatin1String("ble:"))
-                                   ? i18n("Could not start the transfer to %1 over Bluetooth. The device must show Quick Share's receive screen, and some phones cannot be sent to over Bluetooth yet", who.toHtmlEscaped())
+                                   ? i18n("Could not start the transfer to %1 over Bluetooth", who.toHtmlEscaped())
                                    : i18n("%1 declined the transfer or could not receive it", who.toHtmlEscaped());
         notifyProblem(QStringLiteral("transferFailed"), i18n("Transfer not accepted"), reason);
     }

@@ -19,4 +19,4 @@ Phones: a Pixel 7 (advertises an L2CAP PSM, quick) and a Galaxy A55 with Samsung
 
 Analysis: delegate to the `phone-log-analyzer` agent (it knows the files and the clocks): give it the folder if it is not the newest, the scenario in a paragraph and what the user saw (seconds waited, what the phone showed). Check its claims against the code before changing anything.
 
-Doc rule: `docs/wifi-direct.md` marks behaviour that never ran on a phone with *(not yet run on a phone)*; remove a marker only after a run showed it, and say what the run showed.
+Doc rule: `docs/wifi-direct.md` marks causes taken from logs or code, not reproduced, with *(inferred)*; remove the marker only after a run showed the cause, and say what the run showed.

@@ -1,18 +1,27 @@
 # Wi-Fi upgrade (transfers without a shared network)
 
 > [!WARNING]
-> Experimental and off by default (`WifiUpgrade`, Settings → Wi-Fi Direct). Verified on real hardware (MT7922, Pixel 7 with Wi-Fi off), in both directions, over Bluetooth then Wi-Fi: receiving from the phone (we host a NetworkManager hotspot) and sending to it (the phone hosts a Wi-Fi Direct group that we join as a normal WPA2 client; a 328 MB file arrived intact at about 55 MB/s). Receiving from a Galaxy A55 (Samsung Quick Share, Android 16) also works: the phone sends over BLE GATT, joins our hotspot on 5 GHz and a file of about 329 MB took about 16 s on the hotspot (about 20 MB/s; the file was not compared after the transfer). Sending to the Galaxy also works: BLE GATT first, then the Wi-Fi Direct group the Galaxy offers (a 329 MB video took about 5 s on the Wi-Fi leg, about 65 MB/s from the log timestamps, and arrived with the same SHA-256 as the original), see [Sending over GATT](#sending-over-gatt). Not verified: see [Limits and unverified](#limits-and-unverified).
+> Experimental and off by default (`WifiUpgrade`, Settings → Wi-Fi Direct). Tested only with a Pixel 7 and a Galaxy A55 (Samsung Quick Share, Android 16) on MT7922 adapters; see [Verified](#verified) and [Limits and unverified](#limits-and-unverified). *(inferred)* marks a cause or claim taken from logs and code, not reproduced. Problems and fixes are welcome as issues and pull requests.
+
+| | |
+|---|---|
+| [What it does](#what-it-does) | The flow and the two directions |
+| [Requirements](#requirements) | Software, privileges, firewall, Flatpak |
+| [Behaviour](#behaviour) | Discovery, sending, trust, cancel |
+| [Timings](#timings-and-timeouts) | Scan windows, dial, watchdogs |
+| [Sending over GATT](#sending-over-gatt) | Phones without an L2CAP channel |
+| [Known behaviours](#known-behaviours) | Causes, handling and status |
+| [Verified](#verified) · [Limits and unverified](#limits-and-unverified) | What ran on hardware and what did not |
+| [Why not a P2P group](#why-not-a-p2p-group) · [Testing](#testing) · [References](#references) | |
 
 ## What it does
 
-Quick Share starts on a cheap medium and can switch to a faster one (the *bandwidth upgrade*). With the setting on, a phone with Wi-Fi off and the computer find each other over Bluetooth Low Energy (BLE), start the transfer there and move it to a Wi-Fi link:
+Quick Share starts on a cheap medium and can switch to a faster one (the *bandwidth upgrade*). With the setting on, a phone with Wi-Fi off and the computer find each other over Bluetooth Low Energy (BLE), start the transfer there and move it to a Wi-Fi link. If any step fails the transfer stays on the first channel.
 
-| Direction | Hotspot host | KuickShare does |
+| Direction | Who hosts the Wi-Fi | KuickShare does |
 |---|---|---|
-| Receiving from a phone | KuickShare | Starts an access point (NetworkManager serves DHCP), offers the credentials, the phone joins and the transfer continues there |
-| Sending to a phone | The phone | Scans for the phone, connects over BLE L2CAP, joins the Wi-Fi Direct group (or hotspot) the phone offers as a normal WPA2 client, connects to it and continues there |
-
-If any step fails the transfer stays on the first channel, as it would without the setting.
+| Receiving from a phone | KuickShare | Starts an access point (NetworkManager serves DHCP), offers the credentials; the phone joins and the transfer continues there |
+| Sending to a phone | The phone | Scans for the phone, connects over BLE (L2CAP, or GATT without a PSM), joins the Wi-Fi Direct group or hotspot the phone offers as a normal WPA2 client and continues there |
 
 ```mermaid
 sequenceDiagram
@@ -26,83 +35,63 @@ sequenceDiagram
     P->>C: Payloads on the new channel, same keys and counters
 ```
 
-## Layout
-
 | Part | Where |
 |---|---|
 | Protocol: frames, hand-over state machine, timeouts, `WifiLink` trait | `third_party/rqs_lib/src/upgrade.rs`, handlers in `hdl/inbound.rs` and `hdl/outbound.rs` (see [THIRD_PARTY.md](../THIRD_PARTY.md)) |
-| BLE receiver: `0xFEF3` advertisement, GATT "weave" service, bridge to a normal receive session | `third_party/rqs_lib/src/hdl/ble_receiver/` |
-| BLE sender: windowed scan, L2CAP and GATT dial, central bridges | `third_party/rqs_lib/src/hdl/ble_scan.rs`, `hdl/ble_send/` |
-| Bluetooth devices in the app: `ble:` ids, `ScanBluetooth`, job with its steps, Send page cleanup | `src/core/app.rs`, `src/core/dbus.rs`, `src/shell/` (see [D-Bus API](dbus-api.md)) |
+| BLE receiver: `0xFEF3` advertisement, GATT "weave" service, bridge to a receive session | `third_party/rqs_lib/src/hdl/ble_receiver/` |
+| BLE sender: windowed scan, L2CAP and GATT dial, central bridges | `hdl/ble_scan.rs`, `hdl/ble_send/` |
+| Bluetooth devices in the app: `ble:` ids, `ScanBluetooth`, job steps, Send page | `src/core/app.rs`, `src/core/dbus.rs`, `src/shell/` (see [D-Bus API](dbus-api.md)) |
 | NetworkManager backend (`NmLink`): hotspot and join over D-Bus | `src/core/link.rs` |
 | Setting | `wifi_upgrade` in `settings.json`, D-Bus property `WifiUpgrade` |
 
-## Requirements and limits
+## Requirements
 
 | Item | Detail |
 |---|---|
-| Network stack | NetworkManager with a Wi-Fi card that can run an access point |
-| Medium | Receiving: `WIFI_HOTSPOT` (we host). Sending: `WIFI_DIRECT` or `WIFI_HOTSPOT` as the phone offers (it hosts, we join). A P2P group on our side is not used, see [below](#why-not-a-p2p-group) |
-| Privileges | None. The hotspot profile uses the `shared` IPv4 method, so NetworkManager starts its own `dnsmasq` for DHCP; the `dnsmasq` package must be installed on the host (without it the hotspot fails to start; the log then names it as a possible cause) |
-| Firewall | While the hotspot is up, the upgrade port (TCP, random per transfer) is opened in firewalld's `nm-shared` zone through its D-Bus API and closed when the transfer ends (it also expires after 300 s). The hotspot profile is put in that zone, which otherwise allows only DHCP, DNS, ssh and ICMP. If firewalld cannot be changed (not running, or polkit refuses `org.fedoraproject.FirewallD1.zone`: Fedora allows `wheel` users, other distributions ask for a password) the profile goes to the `trusted` zone instead and the log says so, which lets the phone reach every service of the computer. Other firewalls (ufw, plain nftables) are not handled: they cannot be changed without root, so with them the zone is always `trusted`. Turning the setting on when firewalld is not running asks for confirmation first (`FirewallManaged` over D-Bus; *not tested* with ufw or nftables, nor inside Flatpak or the AppImage, where the check relies on the permission to talk to firewalld's name) |
-| Wi-Fi on the host | With one radio the normal Wi-Fi connection may drop while the hotspot is up; the previous connection is re-activated when the transfer ends normally, but not after a crash (NetworkManager then reconnects by itself). With the setting on, the daemon deletes every NetworkManager profile whose name starts with `kuickshare-` at start and stop |
-| Discovery | Over the LAN as usual. For a phone that is not on it, the BLE receiver advertises the computer while the setting is on and the device is visible. This makes the computer, under its device name, visible over Bluetooth to anything in range. It sends no data without the user's consent |
-| Network loss | When NetworkManager reports that the last connection is gone, the devices found over the LAN are dropped at once (otherwise they stay until their mDNS records expire) and one Bluetooth scan runs. With another connection still up (Ethernet) nothing happens. When a network comes back, the discovery is restarted (the list is kept), because the mDNS library only checks for new interfaces every 30 s. Both are *not tested with a phone*; the Wi-Fi that KuickShare itself brings up for a receive also triggers the restart, which is harmless |
-| LAN sessions | A transfer over the LAN never takes part in the upgrade: the sender announces `WIFI_LAN` as it did before the feature, and a receiver does not host a hotspot for a LAN peer. Only Bluetooth sessions upgrade. A phone seen both on the LAN and over Bluetooth is listed once, on the LAN |
-| BLE speed | About 5 KB/s, so a transfer over BLE is only useful if the hotspot upgrade succeeds. A phone on the same LAN refuses a hotspot upgrade (Nearby's own rule), so the upgrade only applies off-LAN |
-| Sending | To a phone in Receive mode (visibility Everyone), found by a short BLE scan (the Send page and its refresh button). The phone must show the Quick Share Receive screen, otherwise it advertises nothing usable (see Receive screen). A phone that advertises no PSM is sent to over GATT ([below](#sending-over-gatt)); a send that fails is reported at once, with a notification that says what to check. Samsung's Quick Share ends its advertisement after the token, with no mask byte (so no PSM): the parser accepts that. The Galaxy A55 appeared in scans only while the daemon was advertising itself *(observed twice, cause not verified)*. The phone hosts the network and we join it through NetworkManager. The sender announces `WIFI_HOTSPOT` and `WIFI_DIRECT`; the Pixel offered `WIFI_DIRECT` by itself. After the upgrade the phone uses frames without encryption (`supports_disabling_encryption`), which we follow. The sender holds the files for up to 10 s waiting for the offer |
-| Trusted devices | Not available over Bluetooth: trust is keyed on the sender's MAC address read from its IP, which a BLE session does not have, and the phone's MAC on the Wi-Fi link is not the LAN one *(inferred)*. Every Bluetooth transfer asks for consent; the trust button is hidden and pairing is refused |
-| Receive screen | The phone must show Quick Share's Receive screen. Seen on a Pixel 7 (Android 17, Play services 26.40.32) in the phone's `NearbySharing` log: `FOREGROUND` (Receive open) advertises `allowGattConnections=true` and `allowBleL2capConnections=true`; `BACKGROUND` (home screen, screen on) and `SCREEN_OFF` advertise both as `false`, even with visibility "Everyone" set permanently. This looks like how Quick Share works rather than a Pixel quirk; only the Pixel and the Galaxy A55 were observed |
-| Flatpak | The manifest grants `--system-talk-name=org.freedesktop.NetworkManager` and `--system-talk-name=org.fedoraproject.FirewallD1`, and NetworkManager does the privileged work on the host, so only `dnsmasq` on the host is needed. Sending over Bluetooth also needs `--allow=bluetooth` (the L2CAP socket). Receiving from a phone was verified in the sandbox. |
-| Bluetooth controller | The MT7922 used for testing has known weird behaviours. It reset itself once during a scan (`LE Set Extended Scan Enable` timeout, USB reset, firmware reload); the next attempt worked, and the cause was not investigated |
-| Tests | The `medium` key, the `ble:` ids and the watchdog that reports a send that never started are tested without an adapter. A send through a real adapter has no automated test (it would need a fake BlueZ inside `rqs_lib`): only the `#[ignore]` hardware tests, run by hand, cover it |
+| Network stack | NetworkManager with a Wi-Fi card that can run an access point; the `dnsmasq` package on the host (NetworkManager starts it for the `shared` IPv4 method; without it the hotspot fails and the log names it) |
+| Medium | Receiving: `WIFI_HOTSPOT` (we host). Sending: `WIFI_DIRECT` or `WIFI_HOTSPOT` as the phone offers. A P2P group on our side is not used, see [below](#why-not-a-p2p-group) |
+| Privileges | None |
+| Firewall | While the hotspot is up, the upgrade port (TCP, random per transfer) is opened in firewalld's `nm-shared` zone through its D-Bus API and closed at the end (it also expires after 300 s). The profile is put in that zone, which otherwise allows only DHCP, DNS, ssh and ICMP. If firewalld cannot be changed (not running, or polkit refuses `org.fedoraproject.FirewallD1.zone`; Fedora allows `wheel` users) the profile goes to the `trusted` zone and the log says so: the phone can then reach every service of the computer. Other firewalls (ufw, plain nftables) cannot be changed without root, so the zone is always `trusted`. Turning the setting on while firewalld is not running asks for confirmation (`FirewallManaged` over D-Bus) |
+| Wi-Fi on the host | With one radio the normal connection drops while the link is up and is re-activated when the transfer ends normally (not after a crash: NetworkManager then reconnects by itself). The daemon deletes every NetworkManager profile named `kuickshare-*` at start and stop |
+| Flatpak | The manifest grants `--system-talk-name` for NetworkManager and `org.fedoraproject.FirewallD1`, which do the privileged work on the host, so only `dnsmasq` is needed there. Sending over Bluetooth also needs `--allow=bluetooth` (the L2CAP socket). Receiving was verified in the sandbox; sending was not (see [Limits](#limits-and-unverified)) |
 
-## Why not a P2P group
+## Behaviour
 
-Creating a real Wi-Fi Direct group owner through wpa_supplicant's D-Bus works at the driver level, but NetworkManager 1.56 adopts the new `p2p-<if>-N` supplicant interface and removes it about 80 ms later. Marking the interface or `p2p-dev-<if>` unmanaged did not prevent it. Reading `Group.SSID` on a destroyed group also crashes wpa_supplicant 2.11. The hotspot path avoids both.
+| Topic | Behaviour |
+|---|---|
+| Discovery | Over the LAN as usual. For a phone that is not on it, the BLE receiver advertises the computer (under its device name, visible to anything in range) while the setting is on and the device is visible; nothing is sent without consent |
+| LAN sessions | A LAN transfer never upgrades: the sender announces `WIFI_LAN`, and a receiver does not host a hotspot for a LAN peer. A phone on the same LAN refuses a hotspot upgrade (Nearby's own rule). A phone seen on the LAN and over Bluetooth is listed once, on the LAN |
+| BLE speed | About 5 KB/s: a transfer over BLE is only useful if the upgrade succeeds |
+| Network loss | When NetworkManager reports that the last connection is gone, LAN devices are dropped at once and one Bluetooth scan runs (nothing happens if another connection stays up). When a network comes back, discovery restarts (the list is kept), because the mDNS library checks for new interfaces only every 30 s. Not tested with a phone; the Wi-Fi that KuickShare brings up itself also triggers the restart, which is harmless |
+| LAN search | A phone seen only over Bluetooth makes the mDNS search restart every 5 s, up to 4 times, until its LAN entry shows up (it shares the 5 s limit with the send-time lookup below). The Bluetooth scan and the list are not touched |
+| Route choice | A send to a LAN device first probes its TCP port (1.5 s). If it fails the entry is dropped (`DeviceLost`) and the send goes to the single `ble:` entry with the same name and device type. If none is known, a Bluetooth scan window is started (or the running one is used) and the send waits up to 3 s for that entry; if it is not seen, or more than one matches, it fails with "The device is not reachable". A send to a `ble:` entry goes over the LAN instead when exactly one LAN entry has the same name and device type and its probe succeeds. If none is known, the send asks the LAN once: it restarts the mDNS search (the list is kept; at most every 5 s, only while discovery runs) and waits up to 1.5 s for that entry, else it stays on Bluetooth. Every decision is logged at info (`stays on Bluetooth: ...`) The `TransferUpdated` events carry the id the user picked, whichever route was used (`Core::redirects`), and Cancel is mapped back the same way |
+| Sending | To a phone in Receive mode (visibility Everyone), found by a short BLE scan (Send page and refresh button). The phone must show Quick Share's Receive screen. The sender announces `WIFI_HOTSPOT` and `WIFI_DIRECT` (the Pixel offered `WIFI_DIRECT` by itself), waits up to 10 s for the offer, and follows the unencrypted frames the phone uses after the upgrade (`supports_disabling_encryption`). A send that fails is reported at once with a notification that says what to check. The Send page cannot start another transfer while one is live |
+| Receive screen | Seen on a Pixel 7 (Android 17, Play services 26.40.32) in `NearbySharing`: `FOREGROUND` (Receive open) advertises `allowGattConnections=true` and `allowBleL2capConnections=true`; `BACKGROUND` and `SCREEN_OFF` advertise both `false`, even with visibility Everyone set permanently. The Galaxy A55 stops advertising when no Quick Share screen is open and draws a new endpoint id (see [Known behaviours](#known-behaviours)) |
+| Trusted devices | Not available over Bluetooth: trust is keyed on the sender's MAC read from its IP, which a BLE session lacks, and the phone's MAC on the Wi-Fi link is not the LAN one *(inferred)*. Every Bluetooth transfer asks for consent; the trust button is hidden and pairing is refused |
+| Cancel by the user | Sends the sharing Cancel frame and a Disconnection (after completing a frame the cancel cut in the middle), closes the write side (FIN), waits up to 2 s for the phone to close, and only then ends the session so the Wi-Fi link is released. |
+| Cancel by the phone | A cancel or disconnection frame, or a closed socket, is noticed while we write (a frame is read concurrently with the send; tested in memory only). Other frames read meanwhile (keep-alive, upgrade) are kept, up to 32, and handled in order after the send; the upgrade finishes before the chunks start in the runs seen |
 
-Findings from the hand test (tested Wi-Fi chip: MT7922, tested phone: Pixel 7):
+## Timings and timeouts
 
-- A NetworkManager AP-mode hotspot is visible to the phone and accepts WPA2.
-- A DHCP server of our own had to answer by unicast to the client's MAC: the phone never accepted broadcast offers. NetworkManager's `dnsmasq` (`ipv4.method=shared`) works with the Pixel in both directions, so our server was removed.
-- Android drops a network it validated as having no internet when joined from Settings. Nearby joins programmatically; no drop was seen in the logged transfers.
-
-## Limits and unverified
-
-Everything here was tested only with a Pixel 7 and a Galaxy A55 (Samsung Quick Share) on one MT7922 adapter. No other phone is available, so these cannot be closed by the project:
-
-- Other phones and Wi-Fi chips, a laptop that is using its radio, two phones at once, DFS and regulatory domains (channel 36 with fallback to 2.4 GHz). Whether other phones need the Receive screen like these two do, and whether `MIDGROUND` (seen once on the Pixel) ever advertises GATT without L2CAP.
-- Receivers that do not offer a bandwidth upgrade by themselves (the Pixel and the Galaxy do): the sender would have to send `UPGRADE_PATH_REQUEST`. It is not implemented and cannot be tested without such a phone.
-- Our own Wi-Fi Direct group owner is not implemented, see [above](#why-not-a-p2p-group); the hotspot is the supported way to receive.
-- Firewalls other than firewalld on Fedora. With ufw or nftables the hotspot always uses the `trusted` zone, which opens every port to the phone, and their own rules may also block DHCP and DNS of the hotspot *(not tested)*. The case where polkit refuses the change on firewalld has not been tried.
-
-Checked on a hand run of the local script `dist/test-wifi.sh` (not in git; Pixel 7 receive, Galaxy A55 send):
-
-- **NAT:** while the hotspot is up NetworkManager adds `masquerade` for `192.168.49.0/24` leaving the subnet, and forward rules limited to `wlp4s0` and that subnet; they are gone afterwards and nothing is left behind. `net.ipv4.ip_forward` stays `0`, so nothing is actually routed to another network, which a transfer between the two devices does not need.
-- **Plasma job:** the job's step texts ("Looking for the device…", "Connecting…", "Waiting for the other device to accept", "Sending files", "Receiving files") and its terminate/progress updates reach the tracker (`org.kde.JobViewV3` in the bus capture). The popup showed the title, the progress bar and the Cancel button for a receive; the other step texts were seen only in the capture, not on screen.
-- **Kernel log:** no `btusb`/`mt79xx` reset or Wi-Fi timeout around the transfers. One `hci0: Opcode 0x202d failed: -16` ("Unable to disable LL privacy") appeared when BLE advertising started, a few seconds before a transfer; the controller was busy and the transfer was not affected.
-
-Seen in logs, so not open: the plain frames after the upgrade, the phone's `CLIENT_INTRODUCTION` endpoint id (checked by the receiver before it continues) and an advertisement without the "RxInstantConnectionAdv" field all work on both phones (transfers completed, one compared by SHA-256).
-
-Behaviour with a known cause or a harmless effect, from the logs of the Galaxy A55 send (UTC, timestamps from the daemon and `btmon`):
-
-- **First join fails** with `the access point was not found`, about 2.5 s after the offer and before NetworkManager starts to activate; the second attempt associates about 1.5 s later and the transfer proceeds. The group is probably not in the scan results yet *(inferred: neither NetworkManager nor wpa_supplicant log scan results)*. The scan window of one attempt was widened from 2.5 s to 4.5 s to catch the group on the first try *(not yet run on a phone)*; the retry stays as the fallback.
-- **`GattDial: disconnect timed out`** was our 2 s timer (now 5 s, and the message says that BlueZ closes the link later). The Galaxy never closes the LE link; BlueZ sent the HCI disconnect 0.63 s after the timer and it completed with status 0. The Wi-Fi was already associated. No controller error or reset appears in `btmon`; the kernel log was not captured, so a coexistence problem is not excluded (it did not occur in a later run). The link does close and the transfer is unaffected.
-- The ATT "Attribute Not Found" probes right after the GATT send, `Reject scan trigger since one is already pending` and the `mdns_sd` closed-channel errors when the daemon exits are benign. `mdns_sd` logged `Network is unreachable` sending to 224.0.0.251 on the hotspot interface, with our address as host (192.168.49.1) and as client (.5, .154) (no multicast route there, *inferred*); mDNS now ignores the whole 192.168.49.0/24 range *(not yet run on a phone)*, so a real LAN on that subnet loses mDNS, the same clash the fixed hotspot subnet already has.
-
-Timings: the 40 s watchdog for a send that never started covers the observed time to the first frame (about 18 s over L2CAP and 22 s over GATT, most of it the 12 s scan; to the Galaxy 19 s before the GATT dial, of which 11 s were the wait for the running 15 s list scan to end, now cut short by the send; the phone is then dialled over GATT at its first sighting if it was heard without a PSM at least 10 s before (so a Pixel's full advertisement would have come), unless a PSM shows up *(the interrupt is not yet run on a phone; otherwise the scan waits out its window)*); the join takes up to about 9 s and the phone gives up after about 15 s; the Pixel sends its full advertisement only about every 10 s, so a scan window shorter than that can miss it (the windows are 15 s for the list and 12 s for a send). The GATT dial has 22 s in all and 10 s per `connect`; with the 12 s scan that is 34 s, but a send that waits for BlueZ to stop its discovery (up to 2 s), can pass the 40 s watchdog and the shell's 45 s timer, which then report a failure while the send may still go on *(inferred from the code, not seen)* (the Galaxy needed 5.8 s once); if BlueZ drops the device object after a cancelled connect, the dial lists it again with a short discovery (up to 5 s) before retrying *(not yet run on a phone)*.
-
-Known weaknesses without a reproducible cause: BLE re-advertising and `Device::disconnect` side effects; the GATT notify race (a rewrite with `CharacteristicNotifyMethod::Io` would bind the session to the subscriber); phones on the LAN were not rechecked after the BLE scanner was removed. A phone that sends a cancel or disconnection frame, or closes the socket, in the middle of a file is noticed while we write (a frame is read concurrently with the send; tested in memory only). A cancel by the user on the PC sends the sharing Cancel frame and the Disconnection (after completing a frame cut in the middle by the cancel), closes the write side (FIN) and waits up to 2 s for the phone to close, and only then ends the session so that the link is released; before, only a Disconnection was queued behind the file data and the link was torn down at once, so the Galaxy saw no cancel *(cause inferred from the code and the log: the leftover cancel message ended the session within milliseconds; not yet run on a phone)*. A phone that cancels by tearing the Wi-Fi Direct group down (seen on the Pixel: its `WifiP2pService` dropped the group and no FIN or RST reached us) is still noticed only when a write stalls for 30 s; a `TCP_USER_TIMEOUT` on the stream or cancelling when the link goes away would shorten it *(not done)*. Other frames that arrive during the file send (a keep-alive, an upgrade frame) are kept, up to 32, and handled in order after the send; the upgrade finishes before the chunks start in the runs seen.
-
-For a phone-side capture use `adb logcat -s NearbyConnections NearbyMediums NearbySharing WifiP2pService` (offered medium, `supports_disabling_encryption`, join latency, invalid frames, `allowBleL2capConnections`) together with the daemon log and `btmon -w`, also with a phone on another network and on the same LAN (a phone on the same LAN refuses a hotspot upgrade).
-
-## Testing
-
-`cargo test -p rqs_lib` runs the hand-over, plain and encrypted, the Bluetooth receiver and sender and the scanner in memory and over loopback with a fake `WifiLink`. `cargo test --all-features` covers `link.rs` with a fake NetworkManager. Neither needs hardware. The real link needs a manual test (Wi-Fi card, Bluetooth adapter, phone, `adb logcat` and `btmon` captures): the procedure is in [CONTRIBUTING.md](../CONTRIBUTING.md#hand-tests-with-a-phone-wi-fi-upgrade-and-bluetooth).
+| What | Value | Note |
+|---|---|---|
+| BLE scan window | 15 s for the list, 12 s for a send | The Pixel sends its full advertisement only about every 10 s, so a shorter window can miss it. A send interrupts a running list scan |
+| No-PSM shortcut | The phone is dialled over GATT at its first sighting | Applies if it was heard without a PSM, first at least 10 s before (so a Pixel's full advertisement would have come), within the last 5 minutes, and no PSM has shown up since. Otherwise the scan waits out its window. |
+| First frame of a send | About 18 s over L2CAP, 22 s over GATT | Most of it is the scan; watchdog `BLE_START_TIMEOUT` 40 s in `src/core/app.rs`, shell timer 45 s in `corebridge.cpp` |
+| GATT dial | 22 s in all, 10 s per `connect` (the Galaxy needed 5.8 s once) | If BlueZ drops the device object after a cancelled connect, the dial lists it again with a short discovery (up to 5 s). |
+| Worst case of a send | Over 40 s if it waits for BlueZ to stop a discovery (up to 2 s) before the dial | The UI then reports a failure while the send may go on *(inferred from the code, not seen)* |
+| LAN send: probe | 1.5 s (`PROBE_TIMEOUT`) | TCP connect before the send; a failure means the phone is gone |
+| Bluetooth lookup after a failed LAN probe | Up to 3 s (`BLE_LOOKUP_TIMEOUT`, polled every 100 ms) | Only with the Wi-Fi upgrade on and no `ble:` entry known; ends early on a match or on several matches |
+| LAN send: connect, handshake | 8 s, 20 s | Enforced by the library, which reports the failure; watchdog `LAN_START_TIMEOUT` 40 s in `src/core/app.rs` is only a safety net |
+| mDNS resolve probe | 3 s | The library checks that a resolved device answers before listing it |
+| Join to the phone's network | 4 attempts of 4.5 s of scan polling, hidden-SSID attempts from the third, budget 15 s | The phone gives up after about 15 s. See [first join fails](#known-behaviours) |
+| First encrypted frame over BLE | Waits 200 ms | See [Known behaviours](#known-behaviours). |
+| Write stall (file send) | 30 s | The user's cancel works at once; a phone that vanishes without FIN or RST is noticed only after this |
+| Disconnect and cancel waits | 2 s each; GATT disconnect 5 s | |
 
 ## Sending over GATT
 
-A phone that advertises no PSM (the Galaxy A55 with Samsung Quick Share) is sent to as the GATT central of the Nearby "BLE socket", with the same send session as over L2CAP. `find_target` keeps scanning until the end of its window for a PSM and falls back to the sighting without one, unless the phone was heard without a PSM, first at least 10 s before (also in a list window still running, which a send interrupts) and within the last 5 minutes, in which case its first sighting is enough (a sighting with a PSM always wins); `BleScanner::send` then picks `dial_l2cap` or `dial_gatt`. GATT only carries the handshake and the upgrade offer, so its speed (a few KB/s) does not matter.
+A phone that advertises no PSM (the Galaxy A55 with Samsung Quick Share, whose advertisement ends after the token with no mask byte: the parser accepts that) is sent to as the GATT central of the Nearby "BLE socket", with the same send session as over L2CAP. `find_target` keeps scanning until the end of its window for a PSM and falls back to the sighting without one, unless the [shortcut](#timings-and-timeouts) applies; `BleScanner::send` then picks `dial_l2cap` or `dial_gatt`. GATT carries only the handshake and the upgrade offer, so its speed (a few KB/s) does not matter.
 
 | Part | Where |
 |---|---|
@@ -110,16 +99,74 @@ A phone that advertises no PSM (the Galaxy A55 with Samsung Quick Share) is sent
 | Bridge between the GATT channels and the session stream | `ble_send/gatt_bridge.rs` (`GattCentralBridge`, `GattLink`); `send_over_gatt` in `ble_send/mod.rs` shares the session driving with `send_over_l2cap` |
 | BlueZ dial: connect, find the service holding the Nearby characteristics, subscribe, write | `ble_send/gatt_dial.rs` (`dial_gatt`) |
 
-The phone's table (Galaxy A55): two 0xFEF3 services, one with the five slot characteristics and one with `…1a11000101` (flags `write`, with response) and `…1a11000102` (flags `indicate`); ATT MTU 517, so packets of 509 bytes. It connects without pairing. `dial_gatt` picks the service that holds both Nearby characteristics, writes one packet at a time and subscribes with `StartNotify`, which also covers indications.
+The Galaxy A55 exposes two 0xFEF3 services, one with the five slot characteristics and one with `…1a11000101` (`write`, with response) and `…1a11000102` (`indicate`); ATT MTU 517, so packets of 509 bytes; it connects without pairing. `dial_gatt` picks the service that holds both Nearby characteristics, writes one packet at a time and subscribes with `StartNotify`, which also covers indications.
 
-| Verified | How |
+## Known behaviours
+
+Causes marked *(inferred)* come from logs and code, not from a reproduction.
+
+| Behaviour | Cause and handling |
 |---|---|
-| Whole send session over GATT, with the upgrade, against our own receiver | In-memory loopback tests (`ble_send/gatt_tests.rs`), including 20-byte packets |
-| Dial and weave handshake, and a complete 8 KB send, on a real phone | Pixel 7 in Receive mode, forced onto GATT with `KS_TRANSPORT=gatt` in `send_small_file_to_phone`: link up in about 5 s, MTU 512, transfer finished. After the end the phone sends a weave error packet; the bridge reports it as `Protocol`, which does not fail the transfer |
-| Whole send to the Galaxy A55 (Samsung Quick Share, Android 16) | GATT link up in 1.7 s, MTU 512, then `receiver offers WifiDirect` (5765 MHz); the first join attempt failed (`the access point was not found`), the second worked, and the join took about 5 s after the offer. The 329 MB video arrived with the same SHA-256 as the original (checked with `sha256sum` on the phone through `adb`) |
+| **First join fails** with `the access point was not found`, then the second attempt joins | On a laptop already associated to another network, the phone's group first appears in NetworkManager's list about 6 s after the offer (Pixel, 5805 MHz: offer 11:20:58.1, listed 11:21:04.3; sampled every 0.5 s with `nmcli device wifi list --rescan no`) because a scan of an associated radio visits the channels in turns. `RequestScan` takes no channel list, so the scan cannot be shortened; asking again every 1.5 s did nothing. The first attempt (4.5 s window) fails and the second joins at once, 6-8 s after the offer; a longer window would save only the 1 s retry pause and push the hidden attempts out of the budget. On the desktop (idle radio) the group is listed sooner |
+| **`GattDial: disconnect timed out`** | Our timer (now 5 s) ran out; BlueZ sent the HCI disconnect 0.3-0.6 s later with status 0 and the Galaxy never closes the LE link. The link closes and the transfer is unaffected. No controller error appeared in `btmon`; the kernel log was not captured then, so a Bluetooth/Wi-Fi coexistence problem is not excluded (it did not recur) |
+| **GATT handshake dropped by the phone** (2 of 3 sends to the Galaxy) | The phone parsed our first encrypted frame as a plain one (`invalid OfflineFrame`, then `Incorrect sequence number`); the frame arrived within about 10 ms of its own ConnectionResponse and the packets in `btmon` were identical to the good send *(inferred race on the phone)*. Over Bluetooth the first encrypted frame now waits 200 ms |
+| **A phone draws a new BLE endpoint id** (the Galaxy: `ARWA` became `4IX7` after its screen was locked and unlocked) | A send to the old list entry never found it. When the id is not seen in the window but exactly one other sighting has the same advertised name (and the same device type, when the scan remembers the old one), the send uses that phone and logs `ble:ARWA is now ble:4IX7 (same name)`; the transfer keeps the list entry's id. Two phones with the same name are not guessed between and the error says so; a stranger's phone with the same default name and no other one around would be taken for it, but the phone still has to accept. |
+| **A phone on the LAN is listed only over Bluetooth for seconds** | With both phones steady on the LAN and on the Receive screen, the mDNS record resolved 0.0-2.7 s after each of 5 starts of the search. The record appears and disappears with the phone's own advertising: the Pixel's `NearbySharing` log shows `Start advertising with mode FOREGROUND` at 14:25:11.75 and our `ServiceResolved` came at 14:25:11.83; its `ServiceRemoved` came when it stopped. In the `BACKGROUND`/midground modes it advertises over Bluetooth only, so a send to the `ble:` entry first asks the LAN (restarting the search, up to 1.5 s) and the list repeats that search every 5 s, up to 4 times, for a phone seen over Bluetooth without a LAN entry *(inferred cause: the phone's advertising mode, not a delay of the library)* |
+| **The Galaxy appears late or not at all in the list** | Its Quick Share stops advertising when no Quick Share screen is open ("no scanning phone nearby and no receive surface in foreground") and in short bursts otherwise (37 s and 3 s in its `dumpsys bluetooth_manager`), and reopening the Receive screen did not always restart it; seen in `btmon` and its `logcat`, the cause is theirs. Not verified: whether the Galaxy sends its own socket introduction (the code tolerates both) |
+| **"the discovery ended before the window did"** (3 sends in one session, 0.8-11.6 s into the window) | `bluetoothd` itself sent the mgmt Stop Discovery 6-15 ms before the error (ours takes 50 ms or more); no list scan was running and every scan has its own D-Bus connection, so the cause is not identified. In a later session the same error followed 20 ms and 3.3 s after a restart of the whole discovery (the Bluetooth advertisement is registered again and a new scan window starts), so a send to a Bluetooth entry now restarts only the mDNS search *(inferred)*. A send also scans the window once more when it happens. |
+| **`mdns_sd` logs `Network is unreachable`** to 224.0.0.251 on the hotspot interface, as host (192.168.49.1) and as client (.5, .154) | No multicast route there *(inferred)*; mDNS now ignores the whole `192.168.49.0/24`, so a real LAN on that subnet loses mDNS (the same clash the fixed hotspot subnet has). (The error was absent in one later session.) On the laptop it still logs transient errors during and after a join (IPv4 `224.0.0.251`, IPv6 `ff02::fb` with `os error 99`) |
+| **Benign log lines** | ATT "Attribute Not Found" probes after a GATT send, `Reject scan trigger since one is already pending`, `mdns_sd` closed-channel errors when the daemon exits, `hci0: Opcode 0x202d failed: -16` when advertising starts |
+| **A phone that cancels by tearing the Wi-Fi Direct group down** (the Pixel's `WifiP2pService` dropped the group; no FIN or RST reached us) | Noticed only when a write stalls for 30 s. A `TCP_USER_TIMEOUT` on the stream, or cancelling when the link goes away, would shorten it *(not done)* |
+| **BLE re-advertising and `Device::disconnect` side effects; the GATT notify race** (a rewrite with `CharacteristicNotifyMethod::Io` would bind the session to the subscriber); **phones on the LAN not rechecked** after the BLE scanner was removed | Weaknesses without a reproducible cause |
+| **MT7922 reset once during a scan** (`LE Set Extended Scan Enable` timeout, USB reset, firmware reload) | The next attempt worked; the cause was not investigated |
 
-> [!NOTE]
-> The Galaxy's `nearby_connections` advertiser ran only in short bursts in some runs (37 s and 3 s in its `dumpsys bluetooth_manager`) and reopening the Receive screen did not restart it, so the scanner did not see it then; the cause is unknown. Not verified: whether the Galaxy sends its own socket introduction (the code tolerates both).
+## Verified
+
+All with the MT7922 adapter, a Pixel 7 and a Galaxy A55 (Samsung Quick Share 13.8.52.3, Android 16).
+
+| Test | Result |
+|---|---|
+| Receive from the Pixel 7 (we host a hotspot) | OK |
+| Send to the Pixel 7 (it hosts a Wi-Fi Direct group, we join as WPA2 client) | OK; a 328 MB file arrived intact at about 55 MB/s |
+| Receive from the Galaxy A55 (BLE GATT, then it joins our 5 GHz hotspot) | OK; about 329 MB in about 16 s (about 20 MB/s), the file was not compared after the transfer |
+| Send to the Galaxy A55 (BLE GATT, then the group it offers) | OK; a 329 MB video took about 5 s on the Wi-Fi leg (about 65 MB/s from the log timestamps), same SHA-256 as the original (checked with `sha256sum` on the phone through `adb`). GATT link up in 1.7 s, MTU 512 |
+| Send over GATT to the Pixel 7, forced with `KS_TRANSPORT=gatt` (`send_small_file_to_phone`, 8 KB) | OK; link up in about 5 s, MTU 512. The phone then sends a weave error packet; the bridge reports it as `Protocol`, which does not fail the transfer |
+| Whole send session over GATT with the upgrade, against our own receiver | In-memory loopback tests (`ble_send/gatt_tests.rs`), including 20-byte packets |
+| Laptop (Fedora 45, NetworkManager 1.58, MT7922 associated to the home Wi-Fi) | Send to both phones and receive from both: OK; the home connection returned about 0.6 s after the transfer; no `kuickshare-*` profile left; the join took 6-8 s after the offer |
+| Plain frames after the upgrade, the phone's `CLIENT_INTRODUCTION` endpoint id (the receiver checks it), an advertisement without the "RxInstantConnectionAdv" field | Work on both phones |
+| NAT | While the hotspot is up NetworkManager adds `masquerade` for `192.168.49.0/24` leaving the subnet and forward rules limited to the hotspot interface and that subnet; gone afterwards. `net.ipv4.ip_forward` stays `0`, so nothing is routed to another network |
+| Plasma job | Step texts ("Looking for the device…", "Connecting…", "Waiting for the other device to accept", "Sending files", "Receiving files") and terminate/progress updates reach the tracker (`org.kde.JobViewV3`); the popup showed title, progress bar and Cancel for a receive; the other step texts were seen only in the capture |
+| Kernel log around transfers | No `btusb`/`mt79xx` reset or Wi-Fi timeout |
+| Android and the hotspot | Android drops a network it validated as having no internet when joined from Settings; Nearby joins programmatically and no drop was seen in the logged transfers |
+
+## Limits and unverified
+
+No other phone is available, so these cannot be closed by the project:
+
+| Limit | Detail |
+|---|---|
+| Other hardware | Other phones and Wi-Fi chips, two phones at once, DFS and regulatory domains (channel 36 with fallback to 2.4 GHz). Whether other phones need the Receive screen like these two do, and whether `MIDGROUND` (seen once on the Pixel) ever advertises GATT without L2CAP |
+| `UPGRADE_PATH_REQUEST` | Receivers that do not offer an upgrade by themselves (the Pixel and the Galaxy do) would need the sender to request it. Not implemented, not testable without such a phone |
+| Our own group owner | Not implemented, see [below](#why-not-a-p2p-group); the hotspot is the supported way to receive |
+| Firewalls | Only firewalld on Fedora was tried. With ufw or nftables the hotspot always uses the `trusted` zone, and their rules may block DHCP and DNS *(not tested)*; polkit refusing the firewalld change was not tried; the confirmation check is not tested inside Flatpak or the AppImage |
+| Flatpak | Sending was not verified in the sandbox |
+| Keeping the Wi-Fi up while a laptop joins a phone | Needs a second Wi-Fi interface (the MT7922 reports `#{ managed, P2P-client } <= 2` on up to 2 channels), created with root; not planned. See [Second Wi-Fi interface](#second-wi-fi-interface-idea-not-planned) |
+
+### Second Wi-Fi interface (idea, not planned)
+
+Kept as a note, not worked on. A virtual interface (`iw dev <if> interface add <name> type managed`, root) would let the laptop stay on its network. What it would take: `wifi_device()` (`link.rs`) returns the **first** Wi-Fi device NetworkManager lists, without checking its state, connection or access-point capability, so a second interface is ignored today; the choice would have to prefer a device that is not carrying the active connection, check `WirelessCapabilities` when hosting, and skip `remember_previous` and the restore; the card must allow the combination; and the interface must be created outside the app. The Flatpak sandbox has no way to do that (no `org.freedesktop.Flatpak`, no polkit, no `iw`, and NetworkManager's D-Bus API does not create Wi-Fi interfaces), and the tarball and AppImage installers install nothing privileged (no polkit rule, udev rule or unit): it would be the first privileged host piece and would end "Privileges: None".
+
+## Why not a P2P group
+
+Creating a real Wi-Fi Direct group owner through wpa_supplicant's D-Bus works at the driver level, but NetworkManager 1.56 adopts the new `p2p-<if>-N` supplicant interface and removes it about 80 ms later. Marking the interface or `p2p-dev-<if>` unmanaged did not prevent it. Reading `Group.SSID` on a destroyed group also crashes wpa_supplicant 2.11. The hotspot path avoids both.
+
+Findings from the hand test (MT7922, Pixel 7): a NetworkManager AP-mode hotspot is visible to the phone and accepts WPA2. A DHCP server of our own had to answer by unicast to the client's MAC because the phone never accepted broadcast offers; NetworkManager's `dnsmasq` (`ipv4.method=shared`) works in both directions, so our server was removed.
+
+## Testing
+
+`cargo test -p rqs_lib` runs the hand-over (plain and encrypted), the Bluetooth receiver and sender and the scanner in memory and over loopback with a fake `WifiLink`; `cargo test --all-features` covers `link.rs` with a fake NetworkManager. Neither needs hardware. A send through a real adapter has no automated test (it would need a fake BlueZ inside `rqs_lib`); only the `#[ignore]` hardware tests, run by hand, cover it.
+
+The real link needs a manual test (Wi-Fi card, Bluetooth adapter, phone, `adb logcat` and `btmon` captures): see [CONTRIBUTING.md](../CONTRIBUTING.md#hand-tests-with-a-phone-wi-fi-upgrade-and-bluetooth). The local scripts `dist/test-wifi.sh` (desktop) and `dist/test-laptop.sh` (laptop over ssh) are not in git. For a phone-side capture use `adb logcat -s NearbyConnections NearbyMediums NearbySharing WifiP2pService` (offered medium, `supports_disabling_encryption`, join latency, invalid frames, `allowBleL2capConnections`) together with the daemon log and `btmon -w`, also with a phone on another network and on the same LAN.
 
 ## References
 

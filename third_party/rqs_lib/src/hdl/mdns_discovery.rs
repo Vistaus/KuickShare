@@ -9,6 +9,9 @@ use crate::DeviceType;
 use crate::hdl::new_daemon;
 use crate::utils::{is_not_self_ip, parse_mdns_endpoint_info};
 
+/// How long the reachability probe of a resolved service may take.
+const RESOLVE_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
 #[derive(Debug, Clone, Default)]
 pub struct EndpointInfo {
     pub fullname: String,
@@ -118,7 +121,10 @@ impl MDnsDiscovery {
 
                                     let ip_port = format!("{ip}:{port}");
                                     let fullname = info.get_fullname().to_string();
-                                    if TcpStream::connect(&ip_port).await.is_ok() {
+                                    if matches!(
+                                        tokio::time::timeout(RESOLVE_PROBE_TIMEOUT, TcpStream::connect(&ip_port)).await,
+                                        Ok(Ok(_))
+                                    ) {
                                         let ei = EndpointInfo {
                                             fullname: fullname.clone(),
                                             id: ip_port,

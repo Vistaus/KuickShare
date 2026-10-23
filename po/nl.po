@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: kuickshare 1.0.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-23 09:32+0000\n"
+"POT-Creation-Date: 2026-10-23 10:26+0000\n"
 "PO-Revision-Date: 2026-10-20 11:00+0200\n"
 "Last-Translator: Heimen Stoffels <vistausss@fastmail.com>\n"
 "Language-Team: \n"
@@ -19,19 +19,19 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "X-Generator: Poedit 3.10\n"
 
-#: src/shell/corebridge.cpp:514
+#: src/shell/corebridge.cpp:516
 msgid "Could not update Dolphin's context menu"
 msgstr "Het rechtermuisknopmenu van Dolphin kan niet worden bijgewerkt"
 
-#: src/shell/corebridge.cpp:538
+#: src/shell/corebridge.cpp:540
 msgid "Could not update the application menu"
 msgstr "Het toepassingsmenu kan niet worden bijgewerkt"
 
-#: src/shell/corebridge.cpp:549
+#: src/shell/corebridge.cpp:551
 msgid "Could not add KuickShare to the menus"
 msgstr "KuickShare kan niet worden toegevoegd aan de menu's"
 
-#: src/shell/corebridge.cpp:646
+#: src/shell/corebridge.cpp:648
 msgid ""
 "The Flatpak has no access to %1. Allow it with: flatpak override --user --"
 "filesystem=\"%1\" %2"
@@ -39,11 +39,11 @@ msgstr ""
 "Flatpak heeft geen toegang tot %1. Toegang geven kan door middel van de "
 "opdracht: flatpak override --user --filesystem=\"%1\" %2"
 
-#: src/shell/corebridge.cpp:693
+#: src/shell/corebridge.cpp:695
 msgid "Could not update the autostart entry"
 msgstr "Het automatische opstartitem kan niet worden toegevoegd"
 
-#: src/shell/corebridge.cpp:814
+#: src/shell/corebridge.cpp:816
 msgid "Only files can be shared, folders are not supported"
 msgstr "Je kunt alleen bestanden delen, geen mappen"
 
@@ -80,16 +80,16 @@ msgstr "Klembord versturen"
 msgid "Visible to nearby devices"
 msgstr "Zichtbaar voor apparaten in de buurt"
 
-#: src/shell/main.cpp:201 src/shell/qml/Main.qml:247
+#: src/shell/main.cpp:201 src/shell/qml/Main.qml:264
 #: src/shell/qml/SettingsPage.qml:13 src/shell/qml/ShortcutsDialog.qml:13
 msgid "Preferences"
 msgstr "Instellingen"
 
-#: src/shell/main.cpp:204 src/shell/qml/Main.qml:261
+#: src/shell/main.cpp:204 src/shell/qml/Main.qml:278
 msgid "Quit"
 msgstr "Afsluiten"
 
-#: src/shell/qml/AboutDialog.qml:74 src/shell/qml/Main.qml:275
+#: src/shell/qml/AboutDialog.qml:74 src/shell/qml/Main.qml:292
 msgid "About"
 msgstr "Over"
 
@@ -158,7 +158,7 @@ msgstr "KDE Frameworks %1"
 msgid "Kirigami, notifications, jobs and the other KDE libraries"
 msgstr "Kirigami, meldingen, taken en andere KDE-bibliotheken"
 
-#: src/shell/qml/HelpPage.qml:12 src/shell/qml/Main.qml:268
+#: src/shell/qml/HelpPage.qml:12 src/shell/qml/Main.qml:285
 #: src/shell/qml/ShortcutsDialog.qml:14 src/shell/qml/ShortcutsDialog.qml:15
 msgid "Help"
 msgstr "Hulp"
@@ -167,7 +167,7 @@ msgstr "Hulp"
 msgid "Getting started"
 msgstr "Instelhulp"
 
-#: src/shell/qml/HelpPage.qml:31 src/shell/qml/Main.qml:206
+#: src/shell/qml/HelpPage.qml:31 src/shell/qml/Main.qml:223
 #: src/shell/qml/SendPage.qml:36 src/shell/qml/ShortcutsDialog.qml:11
 msgid "Send"
 msgstr "Versturen"
@@ -175,10 +175,10 @@ msgstr "Versturen"
 #: src/shell/qml/HelpPage.qml:32
 msgid ""
 "Choose or drop files, or type some text, on the Send page, then pick a "
-"device. On the phone, open Quick Share."
+"device On the phone, open Quick Share."
 msgstr ""
-"Kies bestanden of sleep ze naar KuickShare, of typ tekst. Kies vervolgens "
-"een apparaat en open Quick Share op je telefoon."
+"Kies of sleep bestanden, of typ tekst, op de pagina Verzenden en kies dan "
+"een apparaat. Open op de telefoon Quick Share."
 
 #: src/shell/qml/HelpPage.qml:36
 msgid "Be found"
@@ -337,15 +337,13 @@ msgstr ""
 "Voor apparaatherkenning wordt gebruikgemaakt van mDNS. Deze overdrachtspoort "
 "wordt willekeurig gekozen, tenzij je een vaste instelt in de instellingen."
 
-#: src/shell/qml/IntegrationDialog.qml:11
+#: src/shell/qml/IntegrationDialog.qml:10
 msgid "Add KuickShare to the menus?"
 msgstr "Wil je KuickShare toevoegen aan de menu's?"
 
-#: src/shell/qml/IntegrationDialog.qml:19
-msgid "It will appear in the application menu and in Dolphin's context menu."
-msgstr ""
-"KuickShare wordt getoond in zowel programma- als Dolphins "
-"rechtermuisknopmenu's."
+#: src/shell/qml/IntegrationDialog.qml:12
+msgid "It will appear in the application menu and in Dolphin's context menu"
+msgstr "KuickShare wordt getoond in zowel programma- als Dolphins rechtermuisknopmenu's"
 
 #: src/shell/qml/Main.qml:25
 msgid "KuickShare"
@@ -356,24 +354,39 @@ msgid "Quit KuickShare?"
 msgstr "Wil je KuickShare afsluiten?"
 
 #: src/shell/qml/Main.qml:106
-msgid "A transfer is in progress. Quitting stops it."
-msgstr ""
-"Er is een overdracht gaande — door af te sluiten wordt deze afgebroken."
+msgid "A transfer is in progress. Quitting stops it"
+msgstr "Er is een overdracht gaande — door af te sluiten wordt deze afgebroken"
 
-#: src/shell/qml/Main.qml:213 src/shell/qml/ShortcutsDialog.qml:12
+#: src/shell/qml/Main.qml:154
+msgid "Transfer completed"
+msgstr "Overdracht voltooid"
+
+#: src/shell/qml/Main.qml:157
+msgid "The transfer failed"
+msgstr "De overdracht is mislukt"
+
+#: src/shell/qml/Main.qml:160
+msgid "The transfer was declined"
+msgstr "De overdracht is geweigerd"
+
+#: src/shell/qml/Main.qml:163
+msgid "The transfer was cancelled"
+msgstr "De overdracht is geannuleerd"
+
+#: src/shell/qml/Main.qml:230 src/shell/qml/ShortcutsDialog.qml:12
 #: src/shell/qml/TransfersPage.qml:11
 msgid "Transfers"
 msgstr "Overdrachten"
 
-#: src/shell/qml/Main.qml:231
+#: src/shell/qml/Main.qml:248
 msgid "More"
 msgstr "Meer"
 
-#: src/shell/qml/Main.qml:254 src/shell/qml/ShortcutsDialog.qml:40
+#: src/shell/qml/Main.qml:271 src/shell/qml/ShortcutsDialog.qml:40
 msgid "Shortcuts"
 msgstr "Sneltoetsen"
 
-#: src/shell/qml/Main.qml:398
+#: src/shell/qml/Main.qml:420
 msgid ""
 "The sharing service is not running. Nothing can be sent or received until it "
 "is started."
@@ -381,7 +394,7 @@ msgstr ""
 "De deeldienst is niet actief. Er kan niets worden verstuurd of ontvangen "
 "totdat de dienst wordt gestart."
 
-#: src/shell/qml/Main.qml:401
+#: src/shell/qml/Main.qml:423
 msgid "Start service"
 msgstr "Dienst starten"
 
@@ -491,7 +504,7 @@ msgstr "of klik om bestanden te kiezen"
 msgid "Paste from clipboard"
 msgstr "Plakken vanaf klembord"
 
-#: src/shell/qml/SendPage.qml:284 src/shell/qml/TransfersPage.qml:284
+#: src/shell/qml/SendPage.qml:284 src/shell/qml/TransfersPage.qml:227
 #: src/shell/transferwatcher.cpp:51 src/shell/transferwatcher.cpp:135
 msgid "%1 file"
 msgid_plural "%1 files"
@@ -551,19 +564,24 @@ msgstr "Zoek opnieuw naar telefoons in de buurt via Bluetooth"
 msgid "Looking for nearby devices…"
 msgstr "Bezig met zoeken naar apparaten…"
 
-#: src/shell/qml/SendPage.qml:510
-msgid "Choose or drop something to send, then pick a device."
+#: src/shell/qml/SendPage.qml:511
+msgid "A transfer is in progress. You can send again when it ends"
+msgstr ""
+"Er is een overdracht gaande. Je kunt opnieuw versturen als die klaar is."
+
+#: src/shell/qml/SendPage.qml:517
+msgid "Choose or drop something to send, then pick a device"
 msgstr "Kies bestanden of sleep ze hierheen, en kies daarna een apparaat."
 
-#: src/shell/qml/SendPage.qml:558
+#: src/shell/qml/SendPage.qml:565
 msgid "Bluetooth device"
 msgstr "Bluetooth-apparaat"
 
-#: src/shell/qml/SendPage.qml:571
+#: src/shell/qml/SendPage.qml:578
 msgid "Bluetooth"
 msgstr "Bluetooth"
 
-#: src/shell/qml/SendPage.qml:584
+#: src/shell/qml/SendPage.qml:591
 msgid "Paired"
 msgstr "Gekoppeld"
 
@@ -646,8 +664,12 @@ msgid ""
 "Experimental. Needs NetworkManager, its dnsmasq package and Bluetooth. While "
 "on, this computer is visible over Bluetooth to devices in range, and its Wi-"
 "Fi connection may drop while the temporary Wi-Fi link is active. See the "
-"documentation."
-msgstr "Experimenteel. Vereist NetworkManager, het bijbehorende dnsmasq-pakket en Bluetooth. Zolang dit aan staat, is deze computer via Bluetooth zichtbaar voor apparaten binnen bereik en kan de wifi-verbinding wegvallen terwijl de tijdelijke wifi-verbinding actief is. Zie de documentatie."
+"documentation"
+msgstr ""
+"Experimenteel. Vereist NetworkManager, het dnsmasq-pakket en Bluetooth. "
+"Wanneer dit aan staat, is deze computer via Bluetooth zichtbaar voor "
+"apparaten in de buurt, en kan de wifi-verbinding wegvallen zolang de "
+"tijdelijke wifi-verbinding actief is. Zie de documentatie"
 
 #: src/shell/qml/SettingsPage.qml:165
 msgid "Paired devices"
@@ -698,7 +720,7 @@ msgstr ""
 #: src/shell/qml/SettingsPage.qml:245
 msgid ""
 "Matched by name and MAC address. Another device that copies both would be "
-"accepted too. Use only if you trust all devices in your LAN."
+"accepted too. Use only if you trust all devices in your LAN"
 msgstr ""
 "Wordt gevonden op basis van naam en MAC-adres. Een ander apparaat met beide "
 "wordt eveneens vertrouwd. Gebruik dit alleen als je alle apparaten op je "
@@ -799,18 +821,15 @@ msgstr ""
 "wordt KuickShare geminimaliseerd opgestart."
 
 #: src/shell/qml/SettingsPage.qml:359
-msgid "firewalld is not running"
-msgstr "firewalld draait niet"
+msgid "Turn on without a firewall?"
+msgstr "Inschakelen zonder firewall?"
 
 #: src/shell/qml/SettingsPage.qml:360
 msgid ""
 "firewalld is not running, so the firewall cannot be opened for a single "
 "port. While the hotspot is up, the phone that joins it can reach every "
-"service on this computer. Turn it on anyway?"
-msgstr ""
-"firewalld draait niet, dus de firewall kan niet voor één poort worden "
-"geopend. Zolang de hotspot actief is, kan de telefoon die er verbinding mee "
-"maakt elke service op deze computer bereiken. Toch inschakelen?"
+"service on this computer"
+msgstr "firewalld draait niet, dus de firewall kan niet voor één poort worden geopend. Zolang de hotspot actief is, kan de telefoon die er verbinding mee maakt elke service op deze computer bereiken"
 
 #: src/shell/qml/SettingsPage.qml:368
 msgid "Reset preferences?"
@@ -819,10 +838,8 @@ msgstr "Instellingen herstellen?"
 #: src/shell/qml/SettingsPage.qml:369
 msgid ""
 "Every setting goes back to its default. The history and the paired and "
-"trusted devices are kept."
-msgstr ""
-"Alle instellingen worden teruggezet op de standaardwaarden. De geschiedenis "
-"en gekoppelde/vertrouwde apparaten blijven bewaard."
+"trusted devices are kept"
+msgstr "Elke instelling wordt teruggezet op de standaardwaarde. De geschiedenis en de gekoppelde en vertrouwde apparaten blijven bewaard"
 
 #: src/shell/qml/SettingsPage.qml:375
 msgid "Reset"
@@ -861,93 +878,89 @@ msgid "Clear history?"
 msgstr "Wil je de geschiedenis wissen?"
 
 #: src/shell/qml/TransfersPage.qml:22
-msgid "Files you received are not touched."
-msgstr "Alle reeds ontvangen bestanden blijven bewaard."
+msgid "Files you received are not touched"
+msgstr "Alle reeds ontvangen bestanden blijven bewaard"
 
-#: src/shell/qml/TransfersPage.qml:75
-msgid "Copied to clipboard"
-msgstr "Gekopieerd naar het klembord"
-
-#: src/shell/qml/TransfersPage.qml:111
+#: src/shell/qml/TransfersPage.qml:54
 msgid "Transfer details"
 msgstr "Overdrachtsinformatie"
 
-#: src/shell/qml/TransfersPage.qml:133
+#: src/shell/qml/TransfersPage.qml:76
 msgid "Result"
 msgstr "Resultaat"
 
-#: src/shell/qml/TransfersPage.qml:133
+#: src/shell/qml/TransfersPage.qml:76
 msgid "Size"
 msgstr "Grootte"
 
-#: src/shell/qml/TransfersPage.qml:258 src/shell/transferwatcher.cpp:52
+#: src/shell/qml/TransfersPage.qml:201 src/shell/transferwatcher.cpp:52
 msgid "Looking for the device…"
 msgstr "Apparaat zoeken…"
 
-#: src/shell/qml/TransfersPage.qml:258 src/shell/qml/TransfersPage.qml:264
-#: src/shell/qml/TransfersPage.qml:278 src/shell/transferwatcher.cpp:52
+#: src/shell/qml/TransfersPage.qml:201 src/shell/qml/TransfersPage.qml:207
+#: src/shell/qml/TransfersPage.qml:221 src/shell/transferwatcher.cpp:52
 #: src/shell/transferwatcher.cpp:106
 msgid "Connecting…"
 msgstr "Bezig met verbinden…"
 
-#: src/shell/qml/TransfersPage.qml:260
+#: src/shell/qml/TransfersPage.qml:203
 msgid "Waiting for your approval"
 msgstr "Wachten op goedkeuring"
 
-#: src/shell/qml/TransfersPage.qml:262
+#: src/shell/qml/TransfersPage.qml:205
 msgid "Receiving…"
 msgstr "Bezig met ontvangen…"
 
-#: src/shell/qml/TransfersPage.qml:264 src/shell/transferwatcher.cpp:106
+#: src/shell/qml/TransfersPage.qml:207 src/shell/transferwatcher.cpp:106
 msgid "Waiting for the other device to accept"
 msgstr "Wachten tot het andere apparaat accepteert"
 
-#: src/shell/qml/TransfersPage.qml:267 src/shell/transferwatcher.cpp:122
+#: src/shell/qml/TransfersPage.qml:210 src/shell/transferwatcher.cpp:122
 msgid "Switching to Wi-Fi…"
 msgstr "Overschakelen naar wifi…"
 
-#: src/shell/qml/TransfersPage.qml:267
+#: src/shell/qml/TransfersPage.qml:210
 msgid "Sending…"
 msgstr "Bezig met versturen…"
 
-#: src/shell/qml/TransfersPage.qml:269
+#: src/shell/qml/TransfersPage.qml:212
 msgid "Sent"
 msgstr "Verstuurd"
 
-#: src/shell/qml/TransfersPage.qml:269
+#: src/shell/qml/TransfersPage.qml:212
 msgid "Received"
 msgstr "Ontvangen"
 
-#: src/shell/qml/TransfersPage.qml:271
+#: src/shell/qml/TransfersPage.qml:214
 msgid "Cancelled"
 msgstr "Afgebroken"
 
-#: src/shell/qml/TransfersPage.qml:273
+#: src/shell/qml/TransfersPage.qml:216
 msgid "Declined"
 msgstr "Afgewezen"
 
-#: src/shell/qml/TransfersPage.qml:273
+#: src/shell/qml/TransfersPage.qml:216
 msgid "You declined"
 msgstr "Je wees het volgende af"
 
-#: src/shell/qml/TransfersPage.qml:276
+#: src/shell/qml/TransfersPage.qml:219
 msgid "Not accepted"
 msgstr "Niet-geaccepteerd"
 
-#: src/shell/qml/TransfersPage.qml:276
+#: src/shell/qml/TransfersPage.qml:219
 msgid "Interrupted"
 msgstr "Onderbroken"
 
-#: src/shell/qml/TransfersPage.qml:312
+#: src/shell/qml/TransfersPage.qml:255
 msgid "The history is large (%1) and may slow KuickShare down."
 msgstr ""
 "De geschiedenisomvang is groot (%1), waardoor KuickShare traag kan zijn."
 
-#: src/shell/qml/TransfersPage.qml:315 src/shell/qml/TransfersPage.qml:338
+#: src/shell/qml/TransfersPage.qml:258 src/shell/qml/TransfersPage.qml:281
 msgid "Clear history"
 msgstr "Geschiedenis wissen"
 
-#: src/shell/qml/TransfersPage.qml:326
+#: src/shell/qml/TransfersPage.qml:269
 msgid ""
 "History is turned off: new transfers are not saved. You can turn it on in "
 "Preferences."
@@ -955,15 +968,15 @@ msgstr ""
 "De geschiedenis wordt niet bijgehouden. Schakel deze instelling in in de "
 "instellingen."
 
-#: src/shell/qml/TransfersPage.qml:350
+#: src/shell/qml/TransfersPage.qml:293
 msgid "No transfers yet"
 msgstr "Er zijn nog geen overdrachten"
 
-#: src/shell/qml/TransfersPage.qml:350
+#: src/shell/qml/TransfersPage.qml:293
 msgid "Starting the sharing service…"
 msgstr "Bezig met starten van deeldienst…"
 
-#: src/shell/qml/TransfersPage.qml:351
+#: src/shell/qml/TransfersPage.qml:294
 msgid ""
 "Sent and received transfers are listed here. Make sure this computer is "
 "visible in Preferences to receive."
@@ -971,7 +984,7 @@ msgstr ""
 "Verstuurde en ontvangen bestanden worden hier getoond. Zorg dat deze "
 "computer zichtbaar is (zie de instellingen) om bestanden te kunnen ontvangen."
 
-#: src/shell/qml/TransfersPage.qml:351
+#: src/shell/qml/TransfersPage.qml:294
 msgid ""
 "Transfers are only listed while the app is open, because the history is "
 "turned off."
@@ -979,49 +992,53 @@ msgstr ""
 "De geschiedenis is uitgeschakeld, dus overdrachten worden alleen getoond "
 "zolang het programma geopend is."
 
-#: src/shell/qml/TransfersPage.qml:507
+#: src/shell/qml/TransfersPage.qml:450
 msgid "Unknown device"
 msgstr "Onbekend apparaat"
 
-#: src/shell/qml/TransfersPage.qml:532
+#: src/shell/qml/TransfersPage.qml:475
 msgid "Trusted"
 msgstr "Vertrouwd"
 
-#: src/shell/qml/TransfersPage.qml:541
+#: src/shell/qml/TransfersPage.qml:484
 msgid "%1%"
 msgstr "%1%"
 
-#: src/shell/qml/TransfersPage.qml:548
+#: src/shell/qml/TransfersPage.qml:491
 msgid "Cancel"
 msgstr "Annuleren"
 
-#: src/shell/qml/TransfersPage.qml:555
+#: src/shell/qml/TransfersPage.qml:498
 msgid "Remove from list"
 msgstr "Verwijderen van lijst"
 
-#: src/shell/qml/TransfersPage.qml:565
+#: src/shell/qml/TransfersPage.qml:508
 msgid "Wants to share with you · PIN %1"
 msgstr "wil bestanden met je delen · pincode: %1"
 
-#: src/shell/qml/TransfersPage.qml:574
+#: src/shell/qml/TransfersPage.qml:517
 msgid "More details"
 msgstr "Meer informatie"
 
-#: src/shell/qml/TransfersPage.qml:612 src/shell/transferwatcher.cpp:201
+#: src/shell/qml/TransfersPage.qml:555 src/shell/transferwatcher.cpp:201
 msgid "Accept"
 msgstr "Goedkeuren"
 
-#: src/shell/qml/TransfersPage.qml:618 src/shell/transferwatcher.cpp:216
+#: src/shell/qml/TransfersPage.qml:561 src/shell/transferwatcher.cpp:216
 msgid "Decline"
 msgstr "Afwijzen"
 
-#: src/shell/qml/TransfersPage.qml:624 src/shell/transferwatcher.cpp:249
+#: src/shell/qml/TransfersPage.qml:567 src/shell/transferwatcher.cpp:249
 msgid "Open folder"
 msgstr "Map openen"
 
-#: src/shell/qml/TransfersPage.qml:630 src/shell/transferwatcher.cpp:233
+#: src/shell/qml/TransfersPage.qml:573 src/shell/transferwatcher.cpp:233
 msgid "Copy"
 msgstr "Kopiëren"
+
+#: src/shell/qml/TransfersPage.qml:577
+msgid "Copied to clipboard"
+msgstr "Gekopieerd naar het klembord"
 
 #: src/shell/transferjob.cpp:33
 msgid "Sending files"
@@ -1052,14 +1069,8 @@ msgid "a nearby device"
 msgstr "een apparaat in de buurt"
 
 #: src/shell/transferwatcher.cpp:183
-msgid ""
-"Could not start the transfer to %1 over Bluetooth. The device must show "
-"Quick Share's receive screen, and some phones cannot be sent to over "
-"Bluetooth yet"
-msgstr ""
-"Kan de overdracht naar %1 via Bluetooth niet starten. Het apparaat moet het "
-"ontvangstscherm van Quick Share tonen en naar sommige telefoons kan nog niet "
-"via Bluetooth worden verzonden"
+msgid "Could not start the transfer to %1 over Bluetooth"
+msgstr "De overdracht naar %1 via Bluetooth kon niet worden gestart"
 
 #: src/shell/transferwatcher.cpp:184
 msgid "%1 declined the transfer or could not receive it"

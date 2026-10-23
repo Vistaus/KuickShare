@@ -62,6 +62,18 @@ private Q_SLOTS:
         QCOMPARE(model.rowCount(), 2);
     }
 
+    void cancellingAPendingSendEndsItAsCancelled()
+    {
+        TransferModel model;
+        model.beginPending(QStringLiteral("a"), {{QStringLiteral("device"), QStringLiteral("Pixel")}});
+        QVERIFY(model.cancelPending(QStringLiteral("a")));
+        QCOMPARE(stateAt(model, 0), QStringLiteral("Cancelled"));
+        QVERIFY(!model.cancelPending(QStringLiteral("a"))); // no longer Starting
+        model.update(QStringLiteral("b"), event(QStringLiteral("SendingFiles")));
+        QVERIFY(!model.cancelPending(QStringLiteral("b")));
+        QCOMPARE(model.rowCount(), 2);
+    }
+
     void anOlderSendFailureDoesNotEndANewerSend()
     {
         TransferModel model;
@@ -84,6 +96,50 @@ private Q_SLOTS:
         model.update(QStringLiteral("a"), event(QStringLiteral("SentIntroduction")));
         model.failPending(QStringLiteral("a"), number);
         QCOMPARE(stateAt(model, 0), QStringLiteral("SentIntroduction"));
+    }
+
+    void busyFollowsTheLiveTransfers()
+    {
+        TransferModel model;
+        QSignalSpy spy(&model, &TransferModel::busyChanged);
+        QVERIFY(!model.busy());
+        model.beginPending(QStringLiteral("a"), {});
+        QVERIFY(model.busy());
+        QCOMPARE(spy.count(), 1);
+        model.update(QStringLiteral("a"), event(QStringLiteral("SendingFiles")));
+        QCOMPARE(spy.count(), 1); // still busy, no new signal
+        model.update(QStringLiteral("a"), event(QStringLiteral("Finished")));
+        QVERIFY(!model.busy());
+        QCOMPARE(spy.count(), 2);
+    }
+
+    void aRequestWaitingForApprovalIsNotBusy()
+    {
+        TransferModel model;
+        model.update(QStringLiteral("in"), {{QStringLiteral("kind"), QStringLiteral("inbound")}, {QStringLiteral("state"), QStringLiteral("WaitingForUserConsent")}});
+        QVERIFY(!model.busy());
+        model.update(QStringLiteral("in"), {{QStringLiteral("state"), QStringLiteral("ReceivingFiles")}});
+        QVERIFY(model.busy());
+        model.clearAll();
+        QVERIFY(!model.busy());
+    }
+
+    void transferEndedIsEmittedOncePerTransfer()
+    {
+        TransferModel model;
+        QSignalSpy spy(&model, &TransferModel::transferEnded);
+        model.update(QStringLiteral("a"), event(QStringLiteral("SendingFiles")));
+        QCOMPARE(spy.count(), 0);
+        model.update(QStringLiteral("a"), event(QStringLiteral("Finished")));
+        model.update(QStringLiteral("a"), event(QStringLiteral("Disconnected"))); // the second final state is ignored
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.first().at(1).toString(), QStringLiteral("Finished"));
+        model.addHistory(event(QStringLiteral("Finished"))); // the saved history is not news
+        QCOMPARE(spy.count(), 1);
+        const quint64 number = model.beginPending(QStringLiteral("b"), {});
+        model.failPending(QStringLiteral("b"), number);
+        QCOMPARE(spy.count(), 2);
+        QCOMPARE(spy.last().at(1).toString(), QStringLiteral("Disconnected"));
     }
 
     void historyIsAppendedBelowLiveTransfers()

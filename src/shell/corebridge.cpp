@@ -63,6 +63,8 @@ namespace
 CoreBridge::CoreBridge(QObject *parent)
     : QObject(parent), m_autostart(Autostart::isEnabled())
 {
+    connect(&m_transfers, &TransferModel::busyChanged, this, &CoreBridge::transferBusyChanged);
+    connect(&m_transfers, &TransferModel::transferEnded, this, &CoreBridge::transferEnded);
     auto bus = QDBusConnection::sessionBus();
     bus.connect(service, path, iface, QStringLiteral("TransferUpdated"), this, SLOT(onTransferUpdated(QString, QVariantMap)));
     bus.connect(service, path, iface, QStringLiteral("DeviceFound"), this, SLOT(onDeviceFound(QString, QVariantMap)));
@@ -751,7 +753,7 @@ void CoreBridge::startSend(const QString &deviceId, QVariantMap row, const QStri
                       emit sendRefused(deviceId);
                   }
               });
-    // The core's own watchdog covers Bluetooth sends only: do not leave a row at "Connecting…" for good.
+    // The core's own watchdog (30 s over the LAN, 40 s over Bluetooth) fires first: this only keeps a row from staying at "Connecting…" for good.
     QTimer::singleShot(45'000, this, [this, deviceId, number]
                        { m_transfers.failPending(deviceId, number); });
 }
@@ -814,6 +816,14 @@ QStringList CoreBridge::filesFromUrls(const QList<QUrl> &urls)
         emit errorOccurred(i18n("Only files can be shared, folders are not supported"));
     }
     return files;
+}
+
+void CoreBridge::cancel(const QString &id)
+{
+    if (m_transfers.cancelPending(id)) {
+        emit transferChanged(id);
+    }
+    call(QStringLiteral("Cancel"), {id});
 }
 
 void CoreBridge::onTransferUpdated(const QString &id, const QVariantMap &received)

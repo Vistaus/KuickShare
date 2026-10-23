@@ -21,6 +21,8 @@ class CoreBridge : public QObject
     Q_PROPERTY(TransferModel *transfers READ transfers CONSTANT)
     Q_PROPERTY(DeviceModel *devices READ devices CONSTANT)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
+    /// A transfer is live: the Send page waits for it to end before starting another.
+    Q_PROPERTY(bool transferBusy READ transferBusy NOTIFY transferBusyChanged)
     Q_PROPERTY(bool suspended READ suspended NOTIFY suspendedChanged)
     Q_PROPERTY(bool visible READ visible WRITE setVisible NOTIFY visibleChanged)
     Q_PROPERTY(QString deviceName READ deviceName WRITE setDeviceName NOTIFY deviceNameChanged)
@@ -51,6 +53,7 @@ public:
     ~CoreBridge() override;
 
     TransferModel *transfers() { return &m_transfers; }
+    bool transferBusy() const { return m_transfers.busy(); }
     DeviceModel *devices() { return &m_devices; }
     bool connected() const { return m_connected; }
     bool visible() const { return m_visible; }
@@ -101,7 +104,8 @@ public:
 
     Q_INVOKABLE void accept(const QString &id) { call(QStringLiteral("Accept"), {id}); }
     Q_INVOKABLE void decline(const QString &id) { call(QStringLiteral("Decline"), {id}); }
-    Q_INVOKABLE void cancel(const QString &id) { call(QStringLiteral("Cancel"), {id}); }
+    /// Asks the core to cancel; a send the core has not reported yet ends as Cancelled right away.
+    Q_INVOKABLE void cancel(const QString &id);
 
     Q_INVOKABLE void startDiscovery();
     Q_INVOKABLE void stopDiscovery();
@@ -151,6 +155,9 @@ public:
 
 Q_SIGNALS:
     void connectedChanged();
+    void transferBusyChanged();
+    /// A live transfer finished, failed or was cancelled (not emitted for the saved history).
+    void transferEnded(const QString &id, const QString &state);
     void serviceStartingChanged();
     void clipboardChanged();
     void historyBytesChanged();

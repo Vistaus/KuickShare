@@ -90,6 +90,26 @@ bool TransferModel::hasActive() const
     return false;
 }
 
+void TransferModel::updateBusy()
+{
+    bool busy = false;
+    for (const Entry &entry : m_entries)
+    {
+        const QString state = entry.info.value(QStringLiteral("state")).toString();
+        const bool waitsForUs = entry.info.value(QStringLiteral("kind")).toString() == QLatin1String("inbound") && state == QLatin1String("WaitingForUserConsent");
+        if (!isFinal(state) && !waitsForUs)
+        {
+            busy = true;
+            break;
+        }
+    }
+    if (busy != m_busy)
+    {
+        m_busy = busy;
+        emit busyChanged();
+    }
+}
+
 QVariantMap TransferModel::info(const QString &id) const
 {
     for (const Entry &entry : m_entries)
@@ -133,6 +153,11 @@ void TransferModel::update(const QString &id, const QVariantMap &info)
         // The state is always authoritative, even when empty.
         m_entries[row].info.insert(QStringLiteral("state"), info.value(QStringLiteral("state")));
         emit dataChanged(index(row), index(row));
+        updateBusy();
+        if (isFinal(info.value(QStringLiteral("state")).toString()))
+        {
+            emit transferEnded(id, info.value(QStringLiteral("state")).toString());
+        }
         return;
     }
     QVariantMap first = info;
@@ -140,6 +165,11 @@ void TransferModel::update(const QString &id, const QVariantMap &info)
     beginInsertRows({}, 0, 0);
     m_entries.prepend({id, first});
     endInsertRows();
+    updateBusy();
+    if (isFinal(first.value(QStringLiteral("state")).toString()))
+    {
+        emit transferEnded(id, first.value(QStringLiteral("state")).toString());
+    }
 }
 
 quint64 TransferModel::beginPending(const QString &id, QVariantMap row)
@@ -156,6 +186,16 @@ void TransferModel::failPending(const QString &id, quint64 number)
     {
         update(id, {{QStringLiteral("state"), QStringLiteral("Disconnected")}});
     }
+}
+
+bool TransferModel::cancelPending(const QString &id)
+{
+    if (info(id).value(QStringLiteral("state")).toString() != QLatin1String("Starting"))
+    {
+        return false;
+    }
+    update(id, {{QStringLiteral("state"), QStringLiteral("Cancelled")}});
+    return true;
 }
 
 void TransferModel::addHistory(const QVariantMap &info)
@@ -175,6 +215,7 @@ void TransferModel::remove(const QString &id)
             beginRemoveRows({}, row, row);
             m_entries.removeAt(row);
             endRemoveRows();
+            updateBusy();
             return;
         }
     }
@@ -198,4 +239,5 @@ void TransferModel::clearAll()
     beginResetModel();
     m_entries.clear();
     endResetModel();
+    updateBusy();
 }

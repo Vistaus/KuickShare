@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(kuickshare VERSION 1.1.2 LANGUAGES CXX)
+project(kuickshare VERSION 1.2.0 LANGUAGES CXX)
 add_compile_definitions(KUICKSHARE_VERSION="${PROJECT_VERSION}")
 
 find_package(ECM REQUIRED NO_MODULE)
@@ -60,6 +60,7 @@ qt_add_qml_module(kuickshare
         qml/AboutDialog.qml
         qml/ShortcutsDialog.qml
         qml/SectionTitle.qml
+        qml/ToastStack.qml
         qml/PairDialog.qml
         qml/IntegrationDialog.qml
 )

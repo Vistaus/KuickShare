@@ -163,6 +163,14 @@ impl Dedup {
                 && (self.current.contains_key(id) || self.known.contains_key(id)))
     }
 
+    /// The device type last seen for the phone, if the windows still remember it.
+    pub fn device_type(&self, id: &[u8; 4]) -> Option<DeviceType> {
+        self.current
+            .get(id)
+            .or_else(|| self.known.get(id))
+            .map(|r| r.device_type.clone())
+    }
+
     /// Withdraws the verdict, e.g. after a send scan saw a PSM.
     pub fn forget_no_psm(&mut self, id: &[u8; 4]) {
         self.no_psm.remove(id);
@@ -274,6 +282,21 @@ pub(crate) async fn wait_discovery_stopped(adapter: &Adapter) {
     debug!("BlueZ still reports the discovery as running");
 }
 
+/// The BlueZ discovery stream closed before the window was over. Seen on hardware (a session
+/// log): `bluetoothd` itself sent the mgmt Stop Discovery, 0.8 s to 11.6 s into a window, and
+/// bluer ends its stream when `Discovering` turns false. The cause is not known; a send scans
+/// once more when it happens.
+#[derive(Debug)]
+struct DiscoveryEnded;
+
+impl std::fmt::Display for DiscoveryEnded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the discovery ended before the window did")
+    }
+}
+
+impl std::error::Error for DiscoveryEnded {}
+
 async fn collect(
     adapter: &Adapter,
     duration: Duration,
@@ -305,7 +328,7 @@ async fn collect(
                     }
                 }
                 Some(_) => {}
-                None => bail!("the discovery ended before the window did"),
+                None => return Err(DiscoveryEnded.into()),
             },
         }
     }
@@ -367,6 +390,46 @@ fn target_found(event: ScanEvent, target: BleTarget, no_psm_known: bool) -> Opti
     }
 }
 
+/// What a send finds when the id it was given is not on the air.
+#[derive(Debug, PartialEq)]
+enum Renamed {
+    /// Nobody else has the phone's name.
+    No,
+    /// The one other phone with its name (and device type, when that is known).
+    Found(ScanResult),
+    /// Several do: which one is the phone cannot be told.
+    Ambiguous(Vec<[u8; 4]>),
+}
+
+/// A phone can draw a new endpoint id (Samsung does after the screen is locked and unlocked)
+/// while the list still shows the old one. Among the sightings of a window, looks for the
+/// phone `wanted` by its advertised name; an empty name or a name shared by several phones
+/// proves nothing.
+fn renamed_sighting(
+    seen: &HashMap<[u8; 4], ScanResult>,
+    wanted: [u8; 4],
+    name: &str,
+    device_type: Option<&DeviceType>,
+) -> Renamed {
+    if name.is_empty() {
+        return Renamed::No;
+    }
+    let mut same: Vec<&ScanResult> = seen
+        .values()
+        .filter(|r| {
+            r.endpoint_id != wanted
+                && r.name == name
+                && device_type.is_none_or(|t| *t == r.device_type)
+        })
+        .collect();
+    same.sort_by_key(|r| r.endpoint_id);
+    match same.as_slice() {
+        [] => Renamed::No,
+        [one] => Renamed::Found((*one).clone()),
+        many => Renamed::Ambiguous(many.iter().map(|r| r.endpoint_id).collect()),
+    }
+}
+
 fn interval_elapsed(last_start: Option<Instant>, now: Instant) -> bool {
     last_start.is_none_or(|l| now.saturating_duration_since(l) >= MIN_SCAN_INTERVAL)
 }
@@ -420,24 +483,40 @@ async fn open_adapter() -> anyhow::Result<(bluer::Session, Adapter)> {
 /// Scans until `target` shows up with a PSM, which ends the scan at once. A sighting without a
 /// PSM is kept and returned at the end of the window (the phone is then reached over GATT),
 /// unless `no_psm_known`: the phone is known to have none, so the first sighting ends the scan.
-/// The scan is over, and BlueZ's discovery stopped, when this returns.
+/// When the id is not seen at all but exactly one other phone advertises the same `name` (and
+/// `device_type`, when known), that phone is returned: it drew a new id. The scan is over, and
+/// BlueZ's discovery stopped, when this returns.
 async fn find_target(
     adapter: &Adapter,
     target: BleTarget,
     no_psm_known: bool,
+    name: &str,
+    device_type: Option<DeviceType>,
     window: Duration,
     ctk: &CancellationToken,
 ) -> anyhow::Result<ScanResult> {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut dedup = Dedup::default();
     let without_psm: Mutex<Option<ScanResult>> = Mutex::new(None);
-    let scan = scan_window(adapter, window, &mut dedup, |event| {
+    // The latest sighting of every phone, for the rename fallback.
+    let sightings: Mutex<HashMap<[u8; 4], ScanResult>> = Mutex::new(HashMap::new());
+    let mut on_event = |event: ScanEvent| {
         if let ScanEvent::Found(r) = &event {
             if r.endpoint_id == target.endpoint_id
                 && r.psm.is_none()
                 && let Ok(mut kept) = without_psm.lock()
             {
                 *kept = Some(r.clone());
+            }
+            if let Ok(mut all) = sightings.lock() {
+                // A sighting with a PSM is not replaced by one without (a Pixel sends it rarely).
+                let keep = r.psm.is_none()
+                    && all
+                        .get(&r.endpoint_id)
+                        .is_some_and(|old| old.psm.is_some() && old.address == r.address);
+                if !keep {
+                    all.insert(r.endpoint_id, r.clone());
+                }
             }
             debug!(
                 "rescan sees {} (PSM {:?}, {} dBm), wanted {}",
@@ -453,31 +532,88 @@ async fn find_target(
         if let Some(r) = target_found(event, target, no_psm_known) {
             let _ = tx.send(r);
         }
-    });
-    let outcome = {
-        tokio::pin!(scan);
-        tokio::select! {
-            Some(found) = rx.recv() => Ok(found),
-            r = &mut scan => match r {
-                Err(e) => Err(e),
-                Ok(()) => rx
-                    .try_recv()
-                    .ok()
-                    .or_else(|| without_psm.lock().ok().and_then(|kept| kept.clone()))
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "{} not seen within {window:?}: is Quick Share open on it, visible to Everyone?",
-                            target.id()
-                        )
-                    }),
-            },
-            () = ctk.cancelled() => Err(anyhow::anyhow!("cancelled while looking for {}", target.id())),
+    };
+    let mut retried = false;
+    let outcome = loop {
+        let started = Instant::now();
+        let outcome = {
+            let scan = scan_window(adapter, window, &mut dedup, &mut on_event);
+            tokio::pin!(scan);
+            tokio::select! {
+                Some(found) = rx.recv() => Ok(found),
+                r = &mut scan => match r {
+                    Err(e) => Err(e),
+                    Ok(()) => match rx
+                        .try_recv()
+                        .ok()
+                        .or_else(|| without_psm.lock().ok().and_then(|kept| kept.clone()))
+                    {
+                        Some(found) => Ok(found),
+                        None => {
+                            let seen = sightings.lock().map(|s| s.clone()).unwrap_or_default();
+                            not_seen(&seen, target, name, device_type.as_ref(), window)
+                        }
+                    },
+                },
+                () = ctk.cancelled() => Err(anyhow::anyhow!("cancelled while looking for {}", target.id())),
+            }
+        };
+        // The scan future was dropped with the block above, which is what stops the discovery.
+        match outcome {
+            Err(e) if !retried && e.downcast_ref::<DiscoveryEnded>().is_some() => {
+                retried = true;
+                debug!(
+                    "rescan for {}: {e:#} after {:?}, scanning once more",
+                    target.id(),
+                    started.elapsed()
+                );
+                // The new discovery must not start under the late stop of this one.
+                wait_discovery_stopped(adapter).await;
+            }
+            outcome => break outcome,
         }
-        // The scan future is dropped here, which is what stops the discovery.
     };
     // Dialing while BlueZ still stops the discovery made the dial fail ("operation in progress").
     wait_discovery_stopped(adapter).await;
     outcome
+}
+
+/// The end of a window without `target`: a renamed phone, or the error to show.
+fn not_seen(
+    seen: &HashMap<[u8; 4], ScanResult>,
+    target: BleTarget,
+    name: &str,
+    device_type: Option<&DeviceType>,
+    window: Duration,
+) -> anyhow::Result<ScanResult> {
+    match renamed_sighting(seen, target.endpoint_id, name, device_type) {
+        Renamed::Found(r) => {
+            info!(
+                "{} is now {} (same name)",
+                target.id(),
+                BleTarget {
+                    endpoint_id: r.endpoint_id
+                }
+                .id()
+            );
+            Ok(r)
+        }
+        Renamed::Ambiguous(ids) => {
+            let ids: Vec<String> = ids
+                .into_iter()
+                .map(|endpoint_id| BleTarget { endpoint_id }.id())
+                .collect();
+            Err(anyhow::anyhow!(
+                "{} not seen within {window:?}, and several phones are named \"{name}\" ({}): not guessing which one it is",
+                target.id(),
+                ids.join(", ")
+            ))
+        }
+        Renamed::No => Err(anyhow::anyhow!(
+            "{} not seen within {window:?}: is Quick Share open on it, visible to Everyone?",
+            target.id()
+        )),
+    }
 }
 
 impl BleScanner {
@@ -561,7 +697,21 @@ impl BleScanner {
         };
         let (_session, adapter) = open_adapter().await?;
         let no_psm_known = slot.dedup.advertises_no_psm(&target.endpoint_id);
-        let scan = find_target(&adapter, target, no_psm_known, RESCAN_WINDOW, &ctk).await?;
+        let device_type = slot.dedup.device_type(&target.endpoint_id);
+        let scan = find_target(
+            &adapter,
+            target,
+            no_psm_known,
+            &name,
+            device_type,
+            RESCAN_WINDOW,
+            &ctk,
+        )
+        .await?;
+        // The phone may have drawn a new id; `id` stays the one the app knows the transfer by.
+        let target = BleTarget {
+            endpoint_id: scan.endpoint_id,
+        };
         if scan.psm.is_some() {
             slot.dedup.forget_no_psm(&target.endpoint_id);
             let stream = dial_l2cap(&adapter, &scan).await?;
@@ -1035,5 +1185,95 @@ mod tests {
         assert!(rx.try_recv().is_err());
         // The refused call did not use up the rate limit.
         assert!(s.admit(Instant::now()).is_ok());
+    }
+
+    fn named(id: &[u8; 4], name: &str, device_type: DeviceType) -> ScanResult {
+        ScanResult {
+            name: name.into(),
+            device_type,
+            psm: None,
+            ..result(id, 1, -60)
+        }
+    }
+
+    fn sightings(list: &[ScanResult]) -> HashMap<[u8; 4], ScanResult> {
+        list.iter().map(|r| (r.endpoint_id, r.clone())).collect()
+    }
+
+    #[test]
+    fn a_phone_with_a_new_id_is_found_by_its_name() {
+        let samsung = named(b"4IX7", "Galaxy A55 5G", DeviceType::Phone);
+        let seen = sightings(&[named(b"HNBG", "Pixel 7", DeviceType::Phone), samsung.clone()]);
+        assert_eq!(
+            renamed_sighting(&seen, *b"ARWA", "Galaxy A55 5G", Some(&DeviceType::Phone)),
+            Renamed::Found(samsung.clone())
+        );
+        // The device type is only checked when it is known.
+        assert_eq!(
+            renamed_sighting(&seen, *b"ARWA", "Galaxy A55 5G", None),
+            Renamed::Found(samsung)
+        );
+        assert_eq!(
+            renamed_sighting(&seen, *b"ARWA", "Galaxy A55 5G", Some(&DeviceType::Laptop)),
+            Renamed::No
+        );
+    }
+
+    #[test]
+    fn a_rename_is_not_guessed() {
+        let a = named(b"4IX7", "Galaxy A55 5G", DeviceType::Phone);
+        let b = named(b"Q2ZK", "Galaxy A55 5G", DeviceType::Phone);
+        let seen = sightings(&[a, b]);
+        assert_eq!(
+            renamed_sighting(&seen, *b"ARWA", "Galaxy A55 5G", None),
+            Renamed::Ambiguous(vec![*b"4IX7", *b"Q2ZK"])
+        );
+        // No name to go by, or no phone with it.
+        assert_eq!(renamed_sighting(&seen, *b"ARWA", "", None), Renamed::No);
+        assert_eq!(renamed_sighting(&seen, *b"ARWA", "Pixel 7", None), Renamed::No);
+        // The wanted id itself never counts as another phone.
+        assert_eq!(
+            renamed_sighting(&seen, *b"4IX7", "Galaxy A55 5G", None),
+            Renamed::Found(named(b"Q2ZK", "Galaxy A55 5G", DeviceType::Phone))
+        );
+    }
+
+    #[test]
+    fn the_error_names_the_ambiguity() {
+        let t = BleTarget {
+            endpoint_id: *b"ARWA",
+        };
+        let seen = sightings(&[
+            named(b"4IX7", "Galaxy A55 5G", DeviceType::Phone),
+            named(b"Q2ZK", "Galaxy A55 5G", DeviceType::Phone),
+        ]);
+        let secs = Duration::from_secs(12);
+        let e = not_seen(&seen, t, "Galaxy A55 5G", None, secs).unwrap_err();
+        assert!(e.to_string().contains("ble:4IX7, ble:Q2ZK"), "{e}");
+        let e = not_seen(&seen, t, "Pixel 7", None, secs).unwrap_err();
+        assert!(e.to_string().contains("Quick Share open"), "{e}");
+        let one = sightings(&[named(b"4IX7", "Galaxy A55 5G", DeviceType::Phone)]);
+        assert_eq!(
+            not_seen(&one, t, "Galaxy A55 5G", None, secs).unwrap().endpoint_id,
+            *b"4IX7"
+        );
+    }
+
+    #[test]
+    fn dedup_remembers_the_device_type() {
+        let mut d = Dedup::default();
+        d.begin_window();
+        d.observe(named(b"ARWA", "Galaxy A55 5G", DeviceType::Phone));
+        assert_eq!(d.device_type(b"ARWA"), Some(DeviceType::Phone));
+        assert_eq!(d.device_type(b"4IX7"), None);
+        d.end_window();
+        assert_eq!(d.device_type(b"ARWA"), Some(DeviceType::Phone));
+    }
+
+    #[test]
+    fn an_ended_discovery_is_recognised_through_anyhow() {
+        let e: anyhow::Error = DiscoveryEnded.into();
+        assert!(e.downcast_ref::<DiscoveryEnded>().is_some());
+        assert!(anyhow::anyhow!("other").downcast_ref::<DiscoveryEnded>().is_none());
     }
 }

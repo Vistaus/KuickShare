@@ -72,7 +72,24 @@ The feature needs a real adapter and phone and cannot run in CI. Build with `bui
 - Receiving needs the `dnsmasq` package on the host: NetworkManager runs it to give the phone an address on the hotspot. Neither direction needs privileges.
 - Write the daemon log to a file: `RUST_LOG=info,rqs_lib::hdl::ble_receiver=debug,rqs_lib::upgrade=debug target/debug/kuickshared > kuickshared.log 2>&1` (it logs to stdout), and capture Bluetooth with `sudo btmon -w capture.btsnoop`.
 - The phone's side is in `adb logcat -s NearbyConnections NearbyMediums NearbySharing WifiP2pService` (USB debugging on).
-- Individual steps have `#[ignore]` tests: run `cargo test -p rqs_lib --no-run` (inside the container; the printed path is the test binary) and execute it on the host with `--ignored --nocapture <name>` (`probe_nearby_phones`, `send_small_file_to_phone`, `observe_upgrade_offer`, `send_through_rqs_api`, `gatt_connection_confirm`). `KS_ENDPOINT` picks the phone; `KS_TRANSPORT=gatt` makes `send_small_file_to_phone` use GATT instead of L2CAP. Quick Share must show the Receive screen on the phone, and a Samsung phone may advertise only in short bursts.
+- Individual steps have `#[ignore]` tests. Run `cargo test -p rqs_lib --no-run` (inside the container; the printed path is the test binary) and execute that binary on the host with `--ignored --nocapture <name>`.
+- Quick Share must show the Receive screen on the phone. A Samsung phone may advertise only in short bursts.
+- Two local scripts, not in git: `dist/test-wifi.sh` runs the test on the desktop; `dist/test-laptop.sh` runs it on the laptop over ssh.
+
+| Test | What it does |
+|---|---|
+| `probe_nearby_phones` | Runs one Bluetooth LE scan window and prints what it sees |
+| `send_small_file_to_phone` | Sends a small file over L2CAP (or GATT with `KS_TRANSPORT=gatt`) |
+| `observe_upgrade_offer` | Sends a larger file and prints the phone's Wi-Fi upgrade offer, then declines it and stays on Bluetooth |
+| `send_through_rqs_api` | Same through the public `RQS` API, without the app |
+| `gatt_connection_confirm` | Checks the GATT connection to the phone |
+
+| Variable | Used by | Meaning |
+|---|---|---|
+| `KS_ENDPOINT` | all but `probe_nearby_phones` | 4 character endpoint id of the phone to use |
+| `KS_TRANSPORT` | `send_small_file_to_phone` | `gatt` sends over GATT even if the phone advertises a PSM |
+| `KS_FILE` | `send_small_file_to_phone` | File to send instead of 8 KB of text |
+| `KS_SIZE_KB` | `observe_upgrade_offer`, `send_through_rqs_api` | Size of the temporary file (default 3072) |
 
 ## Code style
 
@@ -104,6 +121,22 @@ build/build-env.sh po/extract.sh
 ```
 
 This rebuilds `po/kuickshare.pot` from the files in `po/POTFILES.in` and merges it into `po/<language>.po` for each code in `po/LINGUAS`. A new language is a new `po/<language>.po` plus its code in `po/LINGUAS`.
+
+The maintainer's `.claude/` setup has a `translator` agent that fills the new entries (see [Claude Code helpers](#claude-code-helpers)).
+
+## Claude Code helpers
+
+`.claude/` holds the maintainer's [Claude Code](https://claude.com/claude-code) setup; contributors can ignore it. Details in [`.claude/CLAUDE.md`](.claude/CLAUDE.md).
+
+| Kind | Name | Purpose |
+|---|---|---|
+| Agent | `translator` | Fills the pending entries of `po/*.po` |
+| Agent | `phone-log-analyzer` | Reads a hand-test session in `dist/logs` |
+| Agent | `rqs-reviewer` | Reviews changes to the Bluetooth and Wi-Fi transfer code |
+| Agent | `changelog` | Drafts the Unreleased section of `CHANGELOG.md` |
+| Skill | `check` | Runs every check of [Checks](#checks) |
+| Skill | `update-translations` | Regenerates the catalogs and runs `translator` |
+| Skill | `phone-test` | Guides and analyses a hand test with the phones |
 
 ## Releases
 
